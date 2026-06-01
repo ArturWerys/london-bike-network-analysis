@@ -1,2 +1,6 @@
 Data/
 .venv/
+ToDo.md
+__pycache__
+boxplot.png
+Plan_MPS.pdf
