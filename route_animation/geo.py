@@ -2,6 +2,7 @@ import bisect
 import math
 from typing import Any
 
+from .config import MAP_HORIZONTAL_PADDING_FRACTION, MAP_VERTICAL_PADDING_FRACTION
 from .models import Station
 
 
@@ -84,7 +85,8 @@ def map_bounds_for_points(
     world_points: list[tuple[float, float]],
     width: int,
     height: int,
-    padding_fraction: float = 0.12,
+    horizontal_padding_fraction: float = MAP_HORIZONTAL_PADDING_FRACTION,
+    vertical_padding_fraction: float = MAP_VERTICAL_PADDING_FRACTION,
 ) -> tuple[float, float, float, float]:
     min_x = min(point[0] for point in world_points)
     max_x = max(point[0] for point in world_points)
@@ -93,10 +95,10 @@ def map_bounds_for_points(
 
     world_width = max(max_x - min_x, 1.0)
     world_height = max(max_y - min_y, 1.0)
-    min_x -= world_width * padding_fraction
-    max_x += world_width * padding_fraction
-    min_y -= world_height * padding_fraction
-    max_y += world_height * padding_fraction
+    min_x -= world_width * horizontal_padding_fraction
+    max_x += world_width * horizontal_padding_fraction
+    min_y -= world_height * vertical_padding_fraction
+    max_y += world_height * vertical_padding_fraction
 
     world_width = max_x - min_x
     world_height = max_y - min_y

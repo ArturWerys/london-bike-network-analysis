@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import hashlib
 from pathlib import Path
 
@@ -38,16 +40,14 @@ def map_cache_path(
 def routes_cache_path(
     cache_dir: Path,
     stations: list[Station],
-    route_length: int,
     graph_cache_name: str,
     cache_label: str = "",
 ) -> Path:
     key_data = {
         "stations": [station.name for station in stations],
-        "route_length": route_length,
         "graph": graph_cache_name,
         "label": cache_label,
-        "version": "simple-routing-v2",
+        "version": "station-pairs-v3-nine-districts",
     }
     digest = hashlib.sha1(repr(key_data).encode("utf-8")).hexdigest()[:12]
     return cache_dir / "routes" / f"routes_{digest}.json"

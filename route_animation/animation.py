@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import math
 from pathlib import Path
 from typing import Any
@@ -6,23 +8,21 @@ from .basemap import load_or_download_basemap
 from .cache import map_cache_path
 from .config import (
     BACKGROUND_COLOR,
+    DISTRICT_COLORS,
     ROAD_COLOR,
     ROUTE_ALPHA,
     ROUTE_SECONDARY_ALPHA,
     ROUTE_SECONDARY_COLOR,
     ROUTE_SHADOW_ALPHA,
     ROUTE_SHADOW_COLOR,
-    ROUTE_TRANSITION_ALPHA,
     ROUTE_TWO_YEARS_ALPHA,
     ROUTE_TWO_YEARS_SHADOW_ALPHA,
-    SIDE_PANEL_WIDTH,
-    STATION_COLOR,
+    STATION_ALPHA,
     STATION_INACTIVE_ALPHA,
-    STATION_INACTIVE_COLOR,
-    STATION_INACTIVE_OUTLINE,
-    STATION_OUTLINE,
+    TEXT_COLOR,
     WHITE,
 )
+from .data import route_district
 from .geo import (
     cumulative_lonlat_distances,
     map_bounds_for_points,
@@ -42,12 +42,20 @@ from .ui import (
     draw_toggle_stage_button,
     draw_weekday_weekend_panel,
     menu_button_rect,
+    panel_width_for_window,
     pause_button_rect,
+    scale_px,
+    scaled_font,
     toggle_stage_button_rect,
+    ui_scale,
 )
 
 
 # Silnik animacji: przygotowanie warstw mapy + ruch rowerzystow.
+
+Color = tuple[int, int, int]
+StationScreenPoint = tuple[int, int, float, Color, Color]
+StationCluster = tuple[int, int, int, float, Color, Color]
 
 
 def as_screen_polylines(polylines: list[list[tuple[float, float]]], transform: Any) -> list[list[tuple[int, int]]]:
@@ -60,36 +68,45 @@ def as_screen_polylines(polylines: list[list[tuple[float, float]]], transform: A
     return screen_polylines
 
 
-def cluster_station_points(station_screen: list[tuple[int, int, float]]) -> list[tuple[int, int, int, float]]:
+def cluster_station_points(
+    station_screen: list[StationScreenPoint],
+    scale: float = 1.0,
+) -> list[StationCluster]:
     if len(station_screen) > 500:
-        cell_size = 18
+        cell_size = scale_px(18, scale, 12)
     elif len(station_screen) > 150:
-        cell_size = 14
+        cell_size = scale_px(14, scale, 10)
     else:
         cell_size = 1
 
-    buckets: dict[tuple[int, int], list[tuple[int, int, float]]] = {}
-    for x, y, score in station_screen:
+    buckets: dict[tuple[int, int], list[StationScreenPoint]] = {}
+    for x, y, score, fill_color, outline_color in station_screen:
         key = (x // cell_size, y // cell_size)
-        buckets.setdefault(key, []).append((x, y, score))
+        buckets.setdefault(key, []).append((x, y, score, fill_color, outline_color))
 
     clusters = []
     for points in buckets.values():
         x_sum = 0
         y_sum = 0
         score_sum = 0.0
-        for x, y, score in points:
+        color_counts: dict[tuple[Color, Color], int] = {}
+        for x, y, score, fill_color, outline_color in points:
             x_sum += x
             y_sum += y
             score_sum += score
-        clusters.append((round(x_sum / len(points)), round(y_sum / len(points)), len(points), score_sum))
+            color_key = (fill_color, outline_color)
+            color_counts[color_key] = color_counts.get(color_key, 0) + 1
+        fill_color, outline_color = max(color_counts.items(), key=lambda item: item[1])[0]
+        clusters.append(
+            (round(x_sum / len(points)), round(y_sum / len(points)), len(points), score_sum, fill_color, outline_color)
+        )
     return clusters
 
 
-def score_bounds(station_screen: list[tuple[int, int, float]]) -> tuple[float, float]:
+def score_bounds(station_screen: list[StationScreenPoint]) -> tuple[float, float]:
     if not station_screen:
         return 0.0, 1.0
-    scores = [max(0.0, float(score)) for _, _, score in station_screen]
+    scores = [max(0.0, float(point[2])) for point in station_screen]
     min_score = min(scores)
     max_score = max(scores)
     if max_score <= min_score:
@@ -112,39 +129,64 @@ def radius_from_score(score: float, min_score: float, max_score: float, min_radi
 def draw_stations(
     pygame: Any,
     screen: Any,
-    active_station_screen: list[tuple[int, int, float]],
-    inactive_station_screen: list[tuple[int, int, float]],
+    active_station_screen: list[StationScreenPoint],
+    inactive_station_screen: list[StationScreenPoint],
+    scale: float = 1.0,
 ) -> None:
     min_score, max_score = score_bounds(active_station_screen + inactive_station_screen)
 
-    inactive_clusters = cluster_station_points(inactive_station_screen)
+    inactive_clusters = cluster_station_points(inactive_station_screen, scale)
     if inactive_clusters:
         inactive_layer = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
-        for x, y, station_count, cluster_score in inactive_clusters:
-            station_radius = radius_from_score(cluster_score, min_score, max_score, 2, 8)
+        for x, y, station_count, cluster_score, fill_color, outline_color in inactive_clusters:
+            station_radius = radius_from_score(
+                cluster_score,
+                min_score,
+                max_score,
+                scale_px(2, scale, 2),
+                scale_px(8, scale, 5),
+            )
             if station_count > 1:
-                station_radius = min(10, station_radius + 1)
+                station_radius = min(scale_px(10, scale, 7), station_radius + scale_px(1, scale, 1))
 
             point = (x, y)
-            pygame.draw.circle(inactive_layer, (*STATION_INACTIVE_COLOR, STATION_INACTIVE_ALPHA), point, station_radius)
+            pygame.draw.circle(inactive_layer, (*fill_color, STATION_INACTIVE_ALPHA), point, station_radius)
             pygame.draw.circle(
                 inactive_layer,
-                (*STATION_INACTIVE_OUTLINE, min(255, STATION_INACTIVE_ALPHA + 35)),
+                (*outline_color, min(255, STATION_INACTIVE_ALPHA + 35)),
                 point,
                 station_radius,
-                1,
+                scale_px(1, scale, 1),
             )
         screen.blit(inactive_layer, (0, 0))
 
-    for x, y, station_count, cluster_score in cluster_station_points(active_station_screen):
-        station_radius = radius_from_score(cluster_score, min_score, max_score, 3, 11)
+    active_clusters = cluster_station_points(active_station_screen, scale)
+    if not active_clusters:
+        return
+
+    active_layer = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
+    for x, y, station_count, cluster_score, fill_color, outline_color in active_clusters:
+        station_radius = radius_from_score(
+            cluster_score,
+            min_score,
+            max_score,
+            scale_px(3, scale, 2),
+            scale_px(11, scale, 7),
+        )
         if station_count > 1:
-            station_radius = min(13, station_radius + 1)
+            station_radius = min(scale_px(13, scale, 8), station_radius + scale_px(1, scale, 1))
 
         point = (x, y)
-        pygame.draw.circle(screen, WHITE, point, station_radius + 1)
-        pygame.draw.circle(screen, STATION_COLOR, point, station_radius)
-        pygame.draw.circle(screen, STATION_OUTLINE, point, station_radius, 1)
+        pygame.draw.circle(active_layer, (*WHITE, 190), point, station_radius + scale_px(1, scale, 1))
+        pygame.draw.circle(active_layer, (*fill_color, STATION_ALPHA), point, station_radius)
+        pygame.draw.circle(
+            active_layer,
+            (*outline_color, min(255, STATION_ALPHA + 35)),
+            point,
+            station_radius,
+            scale_px(1, scale, 1),
+        )
+    screen.blit(active_layer, (0, 0))
 
 
 def prepare_routes(routes: list[RouteAnimation], transform: Any, speed_mps: float) -> list[dict[str, Any]]:
@@ -174,6 +216,7 @@ def draw_cyclists(
     prepared_routes: list[dict[str, Any]],
     simulated_seconds: float,
     speed_mps: float,
+    scale: float = 1.0,
 ) -> None:
     for prepared_route in prepared_routes:
         route = prepared_route["route"]
@@ -184,9 +227,137 @@ def draw_cyclists(
         current_distance = min(loop_position * speed_mps, total_distance_m)
         cyclist_world = point_at_distance(prepared_route["world"], prepared_route["distances"], current_distance)
         cyclist_screen = transform(cyclist_world)
-        pygame.draw.circle(screen, WHITE, cyclist_screen, 10)
-        pygame.draw.circle(screen, route.bike_color, cyclist_screen, 7)
-        pygame.draw.circle(screen, WHITE, cyclist_screen, 2)
+        pygame.draw.circle(screen, WHITE, cyclist_screen, scale_px(10, scale, 7))
+        pygame.draw.circle(screen, route.bike_color, cyclist_screen, scale_px(7, scale, 5))
+        pygame.draw.circle(screen, WHITE, cyclist_screen, scale_px(2, scale, 2))
+
+
+def mercator_latitude_from_y(y: float) -> float:
+    radius = 6_378_137.0
+    return math.degrees(math.atan(math.sinh(y / radius)))
+
+
+def scale_bar_pixel_length(map_bounds: tuple[float, float, float, float], map_width: int) -> int:
+    left, bottom, right, top = map_bounds
+    center_lat = mercator_latitude_from_y((bottom + top) / 2)
+    projected_meters_per_pixel = (right - left) / max(map_width, 1)
+    ground_meters_per_pixel = projected_meters_per_pixel * max(math.cos(math.radians(center_lat)), 0.1)
+    return max(1, int(round(1000 / max(ground_meters_per_pixel, 1e-9))))
+
+
+def draw_scale_bar(
+    pygame: Any,
+    screen: Any,
+    font: Any,
+    map_bounds: tuple[float, float, float, float],
+    map_width: int,
+    height: int,
+    average_route_km: float | None = None,
+    scale: float = 1.0,
+) -> None:
+    bar_width = scale_bar_pixel_length(map_bounds, map_width)
+    max_bar_width = map_width - scale_px(72, scale, 48)
+    if bar_width > max_bar_width:
+        return
+    if average_route_km is None or average_route_km <= 0:
+        return
+
+    padding_x = scale_px(12, scale, 9)
+    padding_y = scale_px(8, scale, 6)
+    tick_height = scale_px(8, scale, 6)
+    margin_x = scale_px(42, scale, 30)
+    bottom_margin = scale_px(46, scale, 34)
+    average_label_image = font.render(f"Śr. trasa na mapie: {average_route_km:.2f} km", True, TEXT_COLOR)
+    average_bar_width = int(round(bar_width * average_route_km))
+    if average_bar_width > max_bar_width:
+        average_bar_width = max_bar_width
+
+    panel_width = max(average_bar_width, average_label_image.get_width()) + padding_x * 2
+    panel_height = average_label_image.get_height() + tick_height * 2 + padding_y * 3
+    panel_x = min(margin_x, max(scale_px(8, scale, 4), map_width - panel_width - scale_px(8, scale, 4)))
+    panel_y = max(scale_px(8, scale, 4), height - bottom_margin - panel_height)
+    panel_rect = pygame.Rect(panel_x, panel_y, panel_width, panel_height)
+
+    panel = pygame.Surface(panel_rect.size, pygame.SRCALPHA)
+    panel.fill((255, 255, 255, 215))
+    pygame.draw.rect(
+        panel,
+        (180, 188, 194, 230),
+        panel.get_rect(),
+        scale_px(1, scale, 1),
+        border_radius=scale_px(6, scale, 4),
+    )
+
+    average_label_x = (panel_width - average_label_image.get_width()) // 2
+    panel.blit(average_label_image, (average_label_x, padding_y))
+    bar_color = (35, 42, 50)
+    line_width = scale_px(2, scale, 1)
+    average_bar_x = (panel_width - average_bar_width) // 2
+    average_bar_y = padding_y * 2 + average_label_image.get_height() + tick_height // 2
+    draw_segmented_scale_line(
+        pygame,
+        panel,
+        average_bar_x,
+        average_bar_y,
+        average_bar_width,
+        average_route_km,
+        tick_height,
+        bar_color,
+        line_width,
+        scale,
+    )
+
+    screen.blit(panel, panel_rect.topleft)
+
+
+def draw_segmented_scale_line(
+    pygame: Any,
+    panel: Any,
+    bar_x: int,
+    bar_y: int,
+    bar_width: int,
+    distance_km: float,
+    tick_height: int,
+    bar_color: tuple[int, int, int],
+    line_width: int,
+    scale: float,
+) -> None:
+    pygame.draw.line(panel, bar_color, (bar_x, bar_y), (bar_x + bar_width, bar_y), line_width)
+    tick_positions = scale_tick_positions(bar_width, distance_km)
+    for tick_offset in tick_positions:
+        tick_x = bar_x + tick_offset
+        pygame.draw.line(
+            panel,
+            bar_color,
+            (tick_x, bar_y - tick_height),
+            (tick_x, bar_y + tick_height),
+            scale_px(1, scale, 1),
+        )
+
+
+def scale_tick_positions(bar_width: int, distance_km: float, tick_interval_km: float = 0.25) -> list[int]:
+    if bar_width <= 0 or distance_km <= 0:
+        return [0]
+
+    positions = []
+    tick_count = int(math.floor(distance_km / tick_interval_km))
+    for tick_index in range(tick_count + 1):
+        tick_distance_km = tick_index * tick_interval_km
+        positions.append(round(bar_width * tick_distance_km / distance_km))
+
+    if positions[-1] != bar_width:
+        positions.append(bar_width)
+
+    return positions
+
+
+def average_prepared_route_km(prepared_routes: list[dict[str, Any]]) -> float:
+    if not prepared_routes:
+        return 0.0
+    total_route_m = 0.0
+    for prepared_route in prepared_routes:
+        total_route_m += float(prepared_route["total_distance_m"])
+    return total_route_m / 1000 / len(prepared_routes)
 
 
 def station_layers(
@@ -194,7 +365,7 @@ def station_layers(
     station_screen: list[tuple[int, int]],
     active_station_names: set[str],
     score_lookup: dict[str, float] | None,
-) -> tuple[list[tuple[int, int, float]], list[tuple[int, int, float]]]:
+) -> tuple[list[StationScreenPoint], list[StationScreenPoint]]:
     active = []
     inactive = []
     for station, point in zip(stations, station_screen):
@@ -203,7 +374,8 @@ def station_layers(
             score = float(score_lookup.get(station.name, 0.0))
             if score <= 0:
                 score = 0.05
-        entry = (point[0], point[1], score)
+        fill_color, outline_color = DISTRICT_COLORS.get(route_district([station]), DISTRICT_COLORS["Centrum"])
+        entry = (point[0], point[1], score, fill_color, outline_color)
         if station.name in active_station_names:
             active.append(entry)
         else:
@@ -222,6 +394,7 @@ def build_base_map(
     height: int,
     map_bounds: tuple[float, float, float, float],
     transform: Any,
+    scale: float = 1.0,
 ) -> Any:
     basemap_surface = load_or_download_basemap(
         ctx=ctx,
@@ -248,8 +421,21 @@ def build_base_map(
 
     for polyline in as_screen_polylines(background_edge_lonlat(graph), transform):
         if len(polyline) >= 2:
-            pygame.draw.lines(surface, ROAD_COLOR, False, polyline, 1)
+            pygame.draw.lines(surface, ROAD_COLOR, False, polyline, scale_px(1, scale, 1))
     return surface
+
+
+def static_render_dimensions(width: int, height: int, render_scale: float) -> tuple[int, int, float]:
+    quality_scale = max(1.0, float(render_scale))
+    render_width = max(width, int(round(width * quality_scale)))
+    render_height = max(height, int(round(height * quality_scale)))
+    return render_width, render_height, quality_scale
+
+
+def downscale_static_scene(pygame: Any, surface: Any, width: int, height: int) -> Any:
+    if surface.get_size() == (width, height):
+        return surface
+    return pygame.transform.smoothscale(surface, (width, height)).convert()
 
 
 def draw_routes_layer(
@@ -263,8 +449,10 @@ def draw_routes_layer(
     fixed_color: tuple[int, int, int] | None = None,
     width_override: int | None = None,
     shadow_alpha: int = ROUTE_SHADOW_ALPHA,
+    scale: float = 1.0,
 ) -> Any:
-    route_width = width_override if width_override is not None else (2 if len(prepared_routes) > 80 else 3)
+    base_route_width = width_override if width_override is not None else (2 if len(prepared_routes) > 80 else 3)
+    route_width = scale_px(base_route_width, scale, 2)
     route_layer = pygame.Surface((map_width, height), pygame.SRCALPHA)
     shadow_color = (*ROUTE_SHADOW_COLOR, shadow_alpha)
 
@@ -276,7 +464,7 @@ def draw_routes_layer(
         base_color = fixed_color if fixed_color is not None else route.route_color
         route_color = (*base_color, alpha)
         if use_shadow:
-            pygame.draw.lines(route_layer, shadow_color, False, screen_points, route_width + 2)
+            pygame.draw.lines(route_layer, shadow_color, False, screen_points, route_width + scale_px(2, scale, 1))
         pygame.draw.lines(route_layer, route_color, False, screen_points, route_width)
     return route_layer
 
@@ -295,35 +483,40 @@ def run_animation(
     cache_dir: Path,
     refresh_map: bool,
     map_zoom: int | None,
+    render_scale: float = 1.0,
     station_scores: dict[str, float] | None = None,
     max_real_seconds: float | None = None,
 ) -> str:
     pygame.display.set_caption("London bike route animation")
     clock = pygame.time.Clock()
-    panel_width = min(SIDE_PANEL_WIDTH, max(260, width // 3))
+    scale = ui_scale(width, height)
+    panel_width = panel_width_for_window(width, scale)
     map_width = width - panel_width
     panel_x = map_width
 
-    font = pygame.font.SysFont("segoeui", 18) or pygame.font.Font(None, 18)
-    small_font = pygame.font.SysFont("segoeui", 15) or pygame.font.Font(None, 15)
-    title_font = pygame.font.SysFont("segoeui", 24, bold=True) or pygame.font.Font(None, 24)
+    font = scaled_font(pygame, 18, scale, min_size=15)
+    small_font = scaled_font(pygame, 15, scale, min_size=12)
+    title_font = scaled_font(pygame, 24, scale, bold=True, min_size=20)
 
     station_points = [project_polyline([(station.lon, station.lat)])[0] for station in stations]
     all_route_points = [point for route in routes for point in project_polyline(route.points_lonlat)]
     map_bounds = map_bounds_for_points(all_route_points + station_points, map_width, height)
     transform = transform_from_bounds(map_bounds, map_width, height)
+    render_map_width, render_height, quality_scale = static_render_dimensions(map_width, height, render_scale)
+    static_transform = transform_from_bounds(map_bounds, render_map_width, render_height)
 
-    station_screen = [transform(point) for point in station_points]
+    static_station_screen = [static_transform(point) for point in station_points]
     active_station_names = {station.name for route in routes for station in route.stations}
-    active_station_screen, inactive_station_screen = station_layers(
+    static_active_station_screen, static_inactive_station_screen = station_layers(
         stations,
-        station_screen,
+        static_station_screen,
         active_station_names,
         station_scores,
     )
 
     speed_mps = speed_kmh / 3.6
     prepared_routes = prepare_routes(routes, transform, speed_mps)
+    static_prepared_routes = prepare_routes(routes, static_transform, speed_mps)
 
     static_map = build_base_map(
         ctx=ctx,
@@ -332,31 +525,38 @@ def run_animation(
         cache_dir=cache_dir,
         refresh_map=refresh_map,
         map_zoom=map_zoom,
-        map_width=map_width,
-        height=height,
+        map_width=render_map_width,
+        height=render_height,
         map_bounds=map_bounds,
-        transform=transform,
+        transform=static_transform,
+        scale=scale * quality_scale,
     )
     static_map.blit(
         draw_routes_layer(
             pygame,
-            map_width,
-            height,
-            prepared_routes,
+            render_map_width,
+            render_height,
+            static_prepared_routes,
             alpha=ROUTE_TWO_YEARS_ALPHA,
             shadow_alpha=ROUTE_TWO_YEARS_SHADOW_ALPHA,
+            scale=scale * quality_scale,
         ),
         (0, 0),
     )
     draw_stations(
         pygame,
         static_map,
-        active_station_screen=active_station_screen,
-        inactive_station_screen=inactive_station_screen,
+        active_station_screen=static_active_station_screen,
+        inactive_station_screen=static_inactive_station_screen,
+        scale=scale * quality_scale,
     )
+    static_map = downscale_static_scene(pygame, static_map, map_width, height)
 
     elapsed_real_seconds = 0.0
     animation_real_seconds = 0.0
+    panel_scroll = 0
+    panel_scroll_max = 0
+    mousewheel_event = getattr(pygame, "MOUSEWHEEL", None)
     paused = False
     exit_action = "quit"
     running = True
@@ -365,8 +565,8 @@ def run_animation(
         dt = clock.tick(60) / 1000
         elapsed_real_seconds += dt
 
-        pause_button = pause_button_rect(pygame, panel_x, panel_width, height)
-        menu_button = menu_button_rect(pygame, panel_x, panel_width, height)
+        pause_button = pause_button_rect(pygame, panel_x, panel_width, height, scale)
+        menu_button = menu_button_rect(pygame, panel_x, panel_width, height, scale)
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
@@ -377,6 +577,16 @@ def run_animation(
                 running = False
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
                 paused = not paused
+            elif mousewheel_event is not None and event.type == mousewheel_event:
+                mouse_x, _ = pygame.mouse.get_pos()
+                if mouse_x >= panel_x:
+                    panel_scroll -= event.y * scale_px(46, scale, 36)
+                    panel_scroll = max(0, min(panel_scroll, panel_scroll_max))
+            elif event.type == pygame.MOUSEBUTTONDOWN and event.button in {4, 5}:
+                if event.pos[0] >= panel_x:
+                    direction = 1 if event.button == 4 else -1
+                    panel_scroll -= direction * scale_px(46, scale, 36)
+                    panel_scroll = max(0, min(panel_scroll, panel_scroll_max))
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 if pause_button.collidepoint(event.pos):
                     paused = not paused
@@ -388,6 +598,7 @@ def run_animation(
             animation_real_seconds += dt
         simulated_seconds = animation_real_seconds * time_scale
 
+        screen.fill(BACKGROUND_COLOR)
         screen.blit(static_map, (0, 0))
         draw_cyclists(
             pygame=pygame,
@@ -396,8 +607,19 @@ def run_animation(
             prepared_routes=prepared_routes,
             simulated_seconds=simulated_seconds,
             speed_mps=speed_mps,
+            scale=scale,
         )
-        draw_info_panel(
+        draw_scale_bar(
+            pygame,
+            screen,
+            small_font,
+            map_bounds,
+            map_width,
+            height,
+            average_route_km=average_prepared_route_km(prepared_routes),
+            scale=scale,
+        )
+        panel_scroll_max = draw_info_panel(
             pygame=pygame,
             screen=screen,
             font=font,
@@ -406,16 +628,18 @@ def run_animation(
             prepared_routes=prepared_routes,
             stations=stations,
             speed_kmh=speed_kmh,
-            time_scale=time_scale,
             panel_x=panel_x,
             panel_width=panel_width,
             height=height,
+            scroll=panel_scroll,
+            scale=scale,
         )
-        draw_menu_button(pygame, screen, font, panel_x, panel_width, height)
-        draw_pause_button(pygame, screen, font, paused, panel_x, panel_width, height)
+        panel_scroll = min(panel_scroll, panel_scroll_max)
+        draw_menu_button(pygame, screen, font, panel_x, panel_width, height, scale)
+        draw_pause_button(pygame, screen, font, paused, panel_x, panel_width, height, scale)
         if paused:
-            draw_pause_badge(pygame, screen, title_font, map_width)
-        draw_attribution(pygame, screen, small_font, map_width, height)
+            draw_pause_badge(pygame, screen, title_font, map_width, scale)
+        draw_attribution(pygame, screen, small_font, map_width, height, scale)
 
         pygame.display.flip()
         if max_real_seconds is not None and elapsed_real_seconds >= max_real_seconds:
@@ -433,6 +657,7 @@ def run_weekday_weekend_animation(
     weekend_stations: list[Station],
     weekday_routes: list[RouteAnimation],
     weekend_routes: list[RouteAnimation],
+    all_stations: list[Station] | None,
     speed_kmh: float,
     time_scale: float,
     width: int,
@@ -442,19 +667,23 @@ def run_weekday_weekend_animation(
     map_zoom: int | None,
     weekday_station_scores: dict[str, float],
     weekend_station_scores: dict[str, float],
+    render_scale: float = 1.0,
     max_real_seconds: float | None = None,
 ) -> str:
-    pygame.display.set_caption("London bike route animation - weekday/weekend toggle")
+    pygame.display.set_caption("London bike route animation - dni tygodnia vs weekendy")
     clock = pygame.time.Clock()
-    panel_width = min(SIDE_PANEL_WIDTH, max(260, width // 3))
+    scale = ui_scale(width, height)
+    panel_width = panel_width_for_window(width, scale)
     map_width = width - panel_width
     panel_x = map_width
 
-    font = pygame.font.SysFont("segoeui", 18) or pygame.font.Font(None, 18)
-    small_font = pygame.font.SysFont("segoeui", 15) or pygame.font.Font(None, 15)
-    title_font = pygame.font.SysFont("segoeui", 24, bold=True) or pygame.font.Font(None, 24)
+    font = scaled_font(pygame, 18, scale, min_size=15)
+    small_font = scaled_font(pygame, 15, scale, min_size=12)
+    title_font = scaled_font(pygame, 24, scale, bold=True, min_size=20)
 
-    station_lookup = {station.name: station for station in weekday_stations + weekend_stations}
+    station_lookup = {}
+    for station in (all_stations or []) + weekday_stations + weekend_stations:
+        station_lookup[station.name] = station
     stations = list(station_lookup.values())
     station_points = [project_polyline([(station.lon, station.lat)])[0] for station in stations]
     all_route_points = [
@@ -462,20 +691,22 @@ def run_weekday_weekend_animation(
     ]
     map_bounds = map_bounds_for_points(all_route_points + station_points, map_width, height)
     transform = transform_from_bounds(map_bounds, map_width, height)
-    station_screen = [transform(point) for point in station_points]
+    render_map_width, render_height, quality_scale = static_render_dimensions(map_width, height, render_scale)
+    static_transform = transform_from_bounds(map_bounds, render_map_width, render_height)
+    static_station_screen = [static_transform(point) for point in station_points]
 
     weekday_active_station_names = {station.name for route in weekday_routes for station in route.stations}
     weekend_active_station_names = {station.name for route in weekend_routes for station in route.stations}
 
     weekday_active_screen, weekday_inactive_screen = station_layers(
         stations,
-        station_screen,
+        static_station_screen,
         weekday_active_station_names,
         weekday_station_scores,
     )
     weekend_active_screen, weekend_inactive_screen = station_layers(
         stations,
-        station_screen,
+        static_station_screen,
         weekend_active_station_names,
         weekend_station_scores,
     )
@@ -483,6 +714,8 @@ def run_weekday_weekend_animation(
     speed_mps = speed_kmh / 3.6
     prepared_weekday = prepare_routes(weekday_routes, transform, speed_mps)
     prepared_weekend = prepare_routes(weekend_routes, transform, speed_mps)
+    static_prepared_weekday = prepare_routes(weekday_routes, static_transform, speed_mps)
+    static_prepared_weekend = prepare_routes(weekend_routes, static_transform, speed_mps)
 
     base_map = build_base_map(
         ctx=ctx,
@@ -491,59 +724,89 @@ def run_weekday_weekend_animation(
         cache_dir=cache_dir,
         refresh_map=refresh_map,
         map_zoom=map_zoom,
-        map_width=map_width,
-        height=height,
+        map_width=render_map_width,
+        height=render_height,
         map_bounds=map_bounds,
-        transform=transform,
+        transform=static_transform,
+        scale=scale * quality_scale,
     )
 
-    weekday_scene = base_map.copy()
+    weekday_scene = pygame.Surface((render_map_width, render_height)).convert()
+    weekday_scene.blit(base_map, (0, 0))
     weekday_scene.blit(
         draw_routes_layer(
             pygame,
-            map_width,
-            height,
-            prepared_weekend,
-            alpha=max(ROUTE_SECONDARY_ALPHA, ROUTE_TRANSITION_ALPHA),
+            render_map_width,
+            render_height,
+            static_prepared_weekend,
+            alpha=ROUTE_SECONDARY_ALPHA,
             use_shadow=False,
             fixed_color=ROUTE_SECONDARY_COLOR,
             width_override=3,
+            scale=scale * quality_scale,
         ),
         (0, 0),
     )
-    weekday_scene.blit(draw_routes_layer(pygame, map_width, height, prepared_weekday), (0, 0))
+    weekday_scene.blit(
+        draw_routes_layer(
+            pygame,
+            render_map_width,
+            render_height,
+            static_prepared_weekday,
+            scale=scale * quality_scale,
+        ),
+        (0, 0),
+    )
     draw_stations(
         pygame,
         weekday_scene,
         active_station_screen=weekday_active_screen,
         inactive_station_screen=weekday_inactive_screen,
+        scale=scale * quality_scale,
     )
+    weekday_scene = downscale_static_scene(pygame, weekday_scene, map_width, height)
 
-    weekend_scene = base_map.copy()
+    weekend_scene = pygame.Surface((render_map_width, render_height)).convert()
+    weekend_scene.blit(base_map, (0, 0))
     weekend_scene.blit(
         draw_routes_layer(
             pygame,
-            map_width,
-            height,
-            prepared_weekday,
-            alpha=max(ROUTE_SECONDARY_ALPHA, ROUTE_TRANSITION_ALPHA),
+            render_map_width,
+            render_height,
+            static_prepared_weekday,
+            alpha=ROUTE_SECONDARY_ALPHA,
             use_shadow=False,
             fixed_color=ROUTE_SECONDARY_COLOR,
             width_override=3,
+            scale=scale * quality_scale,
         ),
         (0, 0),
     )
-    weekend_scene.blit(draw_routes_layer(pygame, map_width, height, prepared_weekend), (0, 0))
+    weekend_scene.blit(
+        draw_routes_layer(
+            pygame,
+            render_map_width,
+            render_height,
+            static_prepared_weekend,
+            scale=scale * quality_scale,
+        ),
+        (0, 0),
+    )
     draw_stations(
         pygame,
         weekend_scene,
         active_station_screen=weekend_active_screen,
         inactive_station_screen=weekend_inactive_screen,
+        scale=scale * quality_scale,
     )
+    weekend_scene = downscale_static_scene(pygame, weekend_scene, map_width, height)
 
     active_stage = "weekday"
     elapsed_real_seconds = 0.0
     animation_real_seconds = 0.0
+    panel_scroll = 0
+    panel_scroll_max = 0
+    mousewheel_event = getattr(pygame, "MOUSEWHEEL", None)
     paused = False
     exit_action = "quit"
     running = True
@@ -552,9 +815,9 @@ def run_weekday_weekend_animation(
         dt = clock.tick(60) / 1000
         elapsed_real_seconds += dt
 
-        pause_button = pause_button_rect(pygame, panel_x, panel_width, height)
-        menu_button = menu_button_rect(pygame, panel_x, panel_width, height)
-        toggle_button = toggle_stage_button_rect(pygame, panel_x, panel_width, height)
+        pause_button = pause_button_rect(pygame, panel_x, panel_width, height, scale)
+        menu_button = menu_button_rect(pygame, panel_x, panel_width, height, scale)
+        toggle_button = toggle_stage_button_rect(pygame, panel_x, panel_width, height, scale)
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -568,6 +831,17 @@ def run_weekday_weekend_animation(
                 paused = not paused
             elif event.type == pygame.KEYDOWN and event.key in {pygame.K_TAB, pygame.K_t}:
                 active_stage = "weekend" if active_stage == "weekday" else "weekday"
+                panel_scroll = 0
+            elif mousewheel_event is not None and event.type == mousewheel_event:
+                mouse_x, _ = pygame.mouse.get_pos()
+                if mouse_x >= panel_x:
+                    panel_scroll -= event.y * scale_px(46, scale, 36)
+                    panel_scroll = max(0, min(panel_scroll, panel_scroll_max))
+            elif event.type == pygame.MOUSEBUTTONDOWN and event.button in {4, 5}:
+                if event.pos[0] >= panel_x:
+                    direction = 1 if event.button == 4 else -1
+                    panel_scroll -= direction * scale_px(46, scale, 36)
+                    panel_scroll = max(0, min(panel_scroll, panel_scroll_max))
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 if pause_button.collidepoint(event.pos):
                     paused = not paused
@@ -576,14 +850,16 @@ def run_weekday_weekend_animation(
                     running = False
                 elif toggle_button.collidepoint(event.pos):
                     active_stage = "weekend" if active_stage == "weekday" else "weekday"
+                    panel_scroll = 0
 
         if not paused:
             animation_real_seconds += dt
 
+        screen.fill(BACKGROUND_COLOR)
         if active_stage == "weekday":
             screen.blit(weekday_scene, (0, 0))
             prepared_routes = prepared_weekday
-            stage_title = "Dni robocze"
+            stage_title = "Dni tygodnia"
         else:
             screen.blit(weekend_scene, (0, 0))
             prepared_routes = prepared_weekend
@@ -597,15 +873,28 @@ def run_weekday_weekend_animation(
             prepared_routes=prepared_routes,
             simulated_seconds=simulated_seconds,
             speed_mps=speed_mps,
+            scale=scale,
+        )
+        draw_scale_bar(
+            pygame,
+            screen,
+            small_font,
+            map_bounds,
+            map_width,
+            height,
+            average_route_km=average_prepared_route_km(prepared_routes),
+            scale=scale,
         )
 
-        draw_weekday_weekend_panel(
+        panel_scroll_max = draw_weekday_weekend_panel(
             pygame=pygame,
             screen=screen,
             font=font,
             title_font=title_font,
             weekday_routes=weekday_routes,
             weekend_routes=weekend_routes,
+            prepared_weekday_routes=prepared_weekday,
+            prepared_weekend_routes=prepared_weekend,
             weekday_stations=weekday_stations,
             weekend_stations=weekend_stations,
             active_stage=active_stage,
@@ -614,14 +903,17 @@ def run_weekday_weekend_animation(
             panel_x=panel_x,
             panel_width=panel_width,
             height=height,
+            scroll=panel_scroll,
+            scale=scale,
         )
-        draw_toggle_stage_button(pygame, screen, font, panel_x, panel_width, height, active_stage)
-        draw_menu_button(pygame, screen, font, panel_x, panel_width, height)
-        draw_pause_button(pygame, screen, font, paused, panel_x, panel_width, height)
+        panel_scroll = min(panel_scroll, panel_scroll_max)
+        draw_toggle_stage_button(pygame, screen, font, panel_x, panel_width, height, active_stage, scale)
+        draw_menu_button(pygame, screen, font, panel_x, panel_width, height, scale)
+        draw_pause_button(pygame, screen, font, paused, panel_x, panel_width, height, scale)
         if paused:
-            draw_pause_badge(pygame, screen, title_font, map_width)
-        draw_stage_badge(pygame, screen, title_font, map_width, stage_title)
-        draw_attribution(pygame, screen, small_font, map_width, height)
+            draw_pause_badge(pygame, screen, title_font, map_width, scale)
+        draw_stage_badge(pygame, screen, title_font, map_width, stage_title, scale)
+        draw_attribution(pygame, screen, small_font, map_width, height, scale)
 
         pygame.display.flip()
         if max_real_seconds is not None and elapsed_real_seconds >= max_real_seconds:

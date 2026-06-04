@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from pathlib import Path
 from typing import Any
 
@@ -19,16 +21,6 @@ def load_or_download_graph(
         print(f"Loading cached OSM graph: {cache_path}")
         return ox.load_graphml(cache_path)
 
-    # Przyspieszenie startu: jesli juz mamy jakikolwiek duzy cache grafu
-    # i user nie wymusza refresh, korzystamy z niego od razu zamiast czekac
-    # na proby pobrania z Overpass.
-    if not refresh_osm:
-        cached_graphs = sorted(cache_path.parent.glob("london_bike_graph_*.graphml"))
-        if cached_graphs:
-            fallback_graph = max(cached_graphs, key=lambda item: item.stat().st_size)
-            print(f"Using existing cached OSM graph for fast startup: {fallback_graph}")
-            return ox.load_graphml(fallback_graph)
-
     print("Downloading OSM bike network for the selected London area...")
     ox.settings.use_cache = True
     ox.settings.cache_folder = str(cache_path.parent / "http_cache")
@@ -36,36 +28,24 @@ def load_or_download_graph(
 
     left, bottom, right, top = bbox
     try:
-        try:
-            graph = ox.graph_from_bbox(
-                (left, bottom, right, top),
-                network_type="bike",
-                simplify=True,
-                retain_all=False,
-                truncate_by_edge=True,
-            )
-        except TypeError:
-            graph = ox.graph_from_bbox(
-                top,
-                bottom,
-                right,
-                left,
-                network_type="bike",
-                simplify=True,
-                retain_all=False,
-                truncate_by_edge=True,
-            )
-    except Exception as download_error:
-        cached_graphs = sorted(cache_path.parent.glob("london_bike_graph_*.graphml"))
-        if cached_graphs:
-            fallback_graph = max(cached_graphs, key=lambda item: item.stat().st_size)
-            print(
-                "OSM download failed, using existing cached graph instead: "
-                f"{fallback_graph}"
-            )
-            print(f"Original download error: {download_error}")
-            return ox.load_graphml(fallback_graph)
-        raise
+        graph = ox.graph_from_bbox(
+            (left, bottom, right, top),
+            network_type="bike",
+            simplify=True,
+            retain_all=False,
+            truncate_by_edge=True,
+        )
+    except TypeError:
+        graph = ox.graph_from_bbox(
+            top,
+            bottom,
+            right,
+            left,
+            network_type="bike",
+            simplify=True,
+            retain_all=False,
+            truncate_by_edge=True,
+        )
 
     ox.save_graphml(graph, cache_path)
     print(f"Saved OSM graph cache: {cache_path}")

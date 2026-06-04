@@ -4,10 +4,12 @@ from pathlib import Path
 from .config import (
     DATA_DIR,
     DEFAULT_MAX_ROUTES,
-    DEFAULT_ROUTE_LENGTH,
-    DEFAULT_STATION_COUNT,
+    DEFAULT_RENDER_SCALE,
     DEFAULT_WINDOW_HEIGHT,
     DEFAULT_WINDOW_WIDTH,
+    DEFAULT_STATION_COUNT,
+    MAX_RENDER_SCALE,
+    WINDOW_SCREEN_RATIO,
 )
 
 
@@ -38,12 +40,6 @@ def parse_args() -> argparse.Namespace:
         help="Number of stations used when --stations is omitted. Default: all 801 stations.",
     )
     parser.add_argument(
-        "--route-length",
-        type=int,
-        default=DEFAULT_ROUTE_LENGTH,
-        help="Legacy parameter kept for cache compatibility (not used in top-pairs route mode).",
-    )
-    parser.add_argument(
         "--max-routes",
         type=int,
         default=DEFAULT_MAX_ROUTES,
@@ -72,8 +68,24 @@ def parse_args() -> argparse.Namespace:
         default=1200.0,
         help="OSM download buffer around the selected stations.",
     )
-    parser.add_argument("--width", type=int, default=DEFAULT_WINDOW_WIDTH, help="Pygame window width.")
-    parser.add_argument("--height", type=int, default=DEFAULT_WINDOW_HEIGHT, help="Pygame window height.")
+    parser.add_argument(
+        "--width",
+        type=int,
+        default=None,
+        help=(
+            f"Pygame window width. If omitted, the window targets {DEFAULT_WINDOW_WIDTH}x{DEFAULT_WINDOW_HEIGHT} "
+            f"and fits within {int(WINDOW_SCREEN_RATIO * 100)}%% of the screen width."
+        ),
+    )
+    parser.add_argument(
+        "--height",
+        type=int,
+        default=None,
+        help=(
+            f"Pygame window height. If omitted, the window targets {DEFAULT_WINDOW_WIDTH}x{DEFAULT_WINDOW_HEIGHT} "
+            f"and fits within {int(WINDOW_SCREEN_RATIO * 100)}%% of the screen height."
+        ),
+    )
     parser.add_argument(
         "--cache-dir",
         default=DATA_DIR / "osm_route_cache",
@@ -100,6 +112,15 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=13,
         help="CartoDB Positron tile zoom.",
+    )
+    parser.add_argument(
+        "--render-scale",
+        type=float,
+        default=DEFAULT_RENDER_SCALE,
+        help=(
+            "Static map quality multiplier. Higher values make routes/stations sharper "
+            f"but use more memory. Default: {DEFAULT_RENDER_SCALE}; maximum: {MAX_RENDER_SCALE}."
+        ),
     )
     parser.add_argument(
         "--max-real-seconds",

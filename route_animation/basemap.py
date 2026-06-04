@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import sys
 from pathlib import Path
 from typing import Any
@@ -21,17 +23,10 @@ def load_or_download_basemap(
     cache_path.parent.mkdir(parents=True, exist_ok=True)
 
     if cache_path.exists() and not refresh_map:
-        return pygame.image.load(str(cache_path)).convert()
-
-    if not refresh_map:
-        cached_maps = sorted(cache_path.parent.glob("*.png"))
-        if cached_maps:
-            fallback_map = max(cached_maps, key=lambda item: item.stat().st_size)
-            print(f"Using existing cached basemap for fast startup: {fallback_map}")
-            return pygame.transform.smoothscale(
-                pygame.image.load(str(fallback_map)).convert(),
-                (width, height),
-            ).convert()
+        surface = pygame.image.load(str(cache_path)).convert()
+        if surface.get_size() != (width, height):
+            surface = pygame.transform.smoothscale(surface, (width, height)).convert()
+        return surface
 
     try:
         left, bottom, right, top = bounds

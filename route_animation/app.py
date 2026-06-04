@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 import os
 
@@ -7,6 +9,12 @@ from .cli import parse_args
 from .config import (
     COMPARISON_MAX_ROUTES,
     COMPARISON_STATION_COUNT,
+    DEFAULT_WINDOW_HEIGHT,
+    DEFAULT_WINDOW_WIDTH,
+    MAX_RENDER_SCALE,
+    MIN_WINDOW_HEIGHT,
+    MIN_WINDOW_WIDTH,
+    WINDOW_SCREEN_RATIO,
 )
 from .data import (
     load_station_network_edges,
@@ -34,6 +42,81 @@ from .ui import run_mode_menu, show_loading_screen
 
 
 # Glowny scenariusz: dane projektu -> graf OSM -> trasy -> animacja pygame.
+
+
+def desktop_size(pygame) -> tuple[int, int] | None:
+    get_desktop_sizes = getattr(pygame.display, "get_desktop_sizes", None)
+    if get_desktop_sizes is not None:
+        try:
+            sizes = get_desktop_sizes()
+        except Exception:
+            sizes = []
+
+        if sizes:
+            width, height = sizes[0]
+            if width > 0 and height > 0:
+                return int(width), int(height)
+
+    try:
+        info = pygame.display.Info()
+    except Exception:
+        return None
+
+    width = int(getattr(info, "current_w", 0))
+    height = int(getattr(info, "current_h", 0))
+    if width > 0 and height > 0:
+        return width, height
+
+    return None
+
+
+def window_size_for_screen(
+    pygame,
+    requested_width: int | None,
+    requested_height: int | None,
+) -> tuple[int, int]:
+    if requested_width is not None and requested_width < 1:
+        raise ValueError("--width must be at least 1.")
+    if requested_height is not None and requested_height < 1:
+        raise ValueError("--height must be at least 1.")
+
+    size = desktop_size(pygame)
+    if size is None:
+        return (
+            requested_width or DEFAULT_WINDOW_WIDTH,
+            requested_height or DEFAULT_WINDOW_HEIGHT,
+        )
+
+    screen_width, screen_height = size
+    max_width = max(1, min(DEFAULT_WINDOW_WIDTH, int(screen_width * WINDOW_SCREEN_RATIO)))
+    max_height = max(1, min(DEFAULT_WINDOW_HEIGHT, int(screen_height * WINDOW_SCREEN_RATIO)))
+
+    if requested_width is not None or requested_height is not None:
+        aspect_ratio = DEFAULT_WINDOW_WIDTH / DEFAULT_WINDOW_HEIGHT
+        width = requested_width
+        height = requested_height
+        if width is None and height is not None:
+            width = round(height * aspect_ratio)
+        if height is None and width is not None:
+            height = round(width / aspect_ratio)
+        return min(width or max_width, screen_width), min(height or max_height, screen_height)
+
+    scale = min(
+        max_width / DEFAULT_WINDOW_WIDTH,
+        max_height / DEFAULT_WINDOW_HEIGHT,
+        1.0,
+    )
+    width = round(DEFAULT_WINDOW_WIDTH * scale)
+    height = round(DEFAULT_WINDOW_HEIGHT * scale)
+
+    if width < MIN_WINDOW_WIDTH and max_width >= MIN_WINDOW_WIDTH:
+        width = MIN_WINDOW_WIDTH
+        height = round(width * DEFAULT_WINDOW_HEIGHT / DEFAULT_WINDOW_WIDTH)
+    if height < MIN_WINDOW_HEIGHT and max_height >= MIN_WINDOW_HEIGHT:
+        height = MIN_WINDOW_HEIGHT
+        width = round(height * DEFAULT_WINDOW_WIDTH / DEFAULT_WINDOW_HEIGHT)
+
+    return min(width, screen_width), min(height, screen_height)
 
 
 def choose_mode(selected_mode: str | None, pygame, screen, width: int, height: int) -> str | None:
@@ -254,9 +337,8 @@ def run_two_year_mode(args, pd, pygame, screen, ox, nx, ctx) -> str:
     route_cache = routes_cache_path(
         args.cache_dir,
         stations,
-        2,
         graph_path.name,
-        cache_label="two_years_pairs_v1",
+        cache_label="two_years_pairs_v2",
     )
     force_rebuild_routes = args.refresh_routes or args.refresh_osm
     routes = None if force_rebuild_routes else load_routes_from_cache(route_cache, stations)
@@ -321,6 +403,7 @@ def run_two_year_mode(args, pd, pygame, screen, ox, nx, ctx) -> str:
         cache_dir=args.cache_dir,
         refresh_map=args.refresh_map,
         map_zoom=args.map_zoom,
+        render_scale=args.render_scale,
         station_scores=station_score_lookup,
         max_real_seconds=args.max_real_seconds,
     )
@@ -336,6 +419,8 @@ def run_weekday_weekend_mode(args, pd, pygame, screen, ox, nx, ctx) -> str:
 
     weekday_stations = stations_from_exact_names(stations_df, summary["weekday_top_names"])
     weekend_stations = stations_from_exact_names(stations_df, summary["weekend_top_names"])
+    all_station_names = [str(name) for name in stations_df["station_name"].tolist()]
+    all_stations = stations_from_exact_names(stations_df, all_station_names)
 
     print_top_preview("dni robocze", summary["weekday_top_names"])
     print_top_preview("weekendy", summary["weekend_top_names"])
@@ -354,16 +439,14 @@ def run_weekday_weekend_mode(args, pd, pygame, screen, ox, nx, ctx) -> str:
     weekday_cache = routes_cache_path(
         args.cache_dir,
         weekday_stations,
-        2,
         graph_path.name,
-        cache_label="weekday_pairs_v1",
+        cache_label="weekday_pairs_v3",
     )
     weekend_cache = routes_cache_path(
         args.cache_dir,
         weekend_stations,
-        2,
         graph_path.name,
-        cache_label="weekend_pairs_v1",
+        cache_label="weekend_pairs_v3",
     )
 
     force_rebuild_routes = args.refresh_routes or args.refresh_osm
@@ -453,6 +536,7 @@ def run_weekday_weekend_mode(args, pd, pygame, screen, ox, nx, ctx) -> str:
         weekend_stations=weekend_stations,
         weekday_routes=weekday_routes,
         weekend_routes=weekend_routes,
+        all_stations=all_stations,
         speed_kmh=args.speed_kmh,
         time_scale=args.time_scale,
         width=args.width,
@@ -460,6 +544,7 @@ def run_weekday_weekend_mode(args, pd, pygame, screen, ox, nx, ctx) -> str:
         cache_dir=args.cache_dir,
         refresh_map=args.refresh_map,
         map_zoom=args.map_zoom,
+        render_scale=args.render_scale,
         weekday_station_scores=weekday_score_lookup,
         weekend_station_scores=weekend_score_lookup,
         max_real_seconds=args.max_real_seconds,
@@ -476,9 +561,16 @@ def main() -> None:
 
     if args.max_routes < 1:
         raise ValueError("--max-routes must be at least 1.")
+    if args.render_scale < 1.0:
+        raise ValueError("--render-scale must be at least 1.0.")
+    if args.render_scale > MAX_RENDER_SCALE:
+        raise ValueError(f"--render-scale must be at most {MAX_RENDER_SCALE}.")
 
+    os.environ.setdefault("SDL_VIDEO_HIGHDPI_DISABLED", "0")
+    os.environ.setdefault("SDL_HINT_VIDEO_HIGHDPI_DISABLED", "0")
     pygame = require_pygame_module()
     pygame.init()
+    args.width, args.height = window_size_for_screen(pygame, args.width, args.height)
     pygame.display.set_caption("London bike route animation")
     screen = pygame.display.set_mode((args.width, args.height))
 
@@ -505,7 +597,7 @@ def main() -> None:
                 pygame,
                 args.width,
                 args.height,
-                title="Ladowanie weekday/weekend...",
+                title="Ladowanie dni tygodnia/weekendy...",
                 subtitle="Przygotowuje porownanie i mape Londynu",
             )
 

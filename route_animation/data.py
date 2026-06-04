@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 from pathlib import Path
 from typing import Any
@@ -127,19 +129,6 @@ def top_stations_from_network(pd: Any, station_count: int) -> list[Station]:
     return stations
 
 
-def station_network_weight_lookup_from_edges(edges_df: Any) -> dict[tuple[str, str], int]:
-    weight_lookup = {}
-    for row in edges_df.itertuples(index=False):
-        key = (str(row.start_station_name), str(row.end_station_name))
-        weight_lookup[key] = int(row.weight)
-    return weight_lookup
-
-
-def station_network_weight_lookup(pd: Any) -> dict[tuple[str, str], int]:
-    edges_df = load_station_network_edges(pd)
-    return station_network_weight_lookup_from_edges(edges_df)
-
-
 def top_station_pairs_from_edges(
     edges_df: Any,
     allowed_station_names: set[str] | None,
@@ -182,121 +171,6 @@ def top_station_pairs_from_edges(
         station_pairs.append((str(start_name), str(end_name), int(pair_weight)))
 
     return station_pairs
-
-
-def route_station_network_weight(
-    route_stations: list[Station],
-    weight_lookup: dict[tuple[str, str], int],
-) -> int:
-    total_weight = 0
-    for start_station, end_station in zip(route_stations, route_stations[1:]):
-        total_weight += weight_lookup.get((start_station.name, end_station.name), 0)
-        total_weight += weight_lookup.get((end_station.name, start_station.name), 0)
-    return total_weight
-
-
-def best_station_by_score(station_names: set[str], score_lookup: dict[str, float]) -> str:
-    best_name = None
-    best_score = -1.0
-
-    for station_name in station_names:
-        score = score_lookup.get(station_name, 0)
-        if best_name is None or score > best_score:
-            best_name = station_name
-            best_score = score
-
-    return str(best_name)
-
-
-def best_station_for_route(
-    current_route: list[str],
-    unused_names: set[str],
-    weight_lookup: dict[tuple[str, str], int],
-    score_lookup: dict[str, float],
-) -> str:
-    best_name = None
-    best_weight = -1
-    best_score = -1.0
-
-    for station_name in unused_names:
-        connection_weight = 0
-        for route_name in current_route:
-            connection_weight += weight_lookup.get((route_name, station_name), 0)
-            connection_weight += weight_lookup.get((station_name, route_name), 0)
-
-        station_score = score_lookup.get(station_name, 0)
-        is_better_weight = connection_weight > best_weight
-        is_same_weight_better_score = connection_weight == best_weight and station_score > best_score
-        if best_name is None or is_better_weight or is_same_weight_better_score:
-            best_name = station_name
-            best_weight = connection_weight
-            best_score = station_score
-
-    return str(best_name)
-
-
-def station_groups_from_network(
-    stations: list[Station],
-    weight_lookup: dict[tuple[str, str], int],
-    score_lookup: dict[str, float],
-    route_length: int,
-) -> list[list[Station]]:
-    station_by_name = {}
-    for station in stations:
-        station_by_name[station.name] = station
-
-    unused_names = set(station_by_name)
-    selected_names = set(station_by_name)
-
-    adjacency: dict[str, list[tuple[str, int]]] = {}
-    for station in stations:
-        adjacency[station.name] = []
-
-    for (start_name, end_name), weight in weight_lookup.items():
-        if start_name in selected_names and end_name in selected_names and start_name != end_name:
-            adjacency[start_name].append((end_name, weight))
-            adjacency[end_name].append((start_name, weight))
-
-    for station_name in adjacency:
-        adjacency[station_name].sort(
-            key=lambda item: (item[1], score_lookup.get(item[0], 0)),
-            reverse=True,
-        )
-
-    route_groups: list[list[Station]] = []
-    while unused_names:
-        current_name = best_station_by_score(unused_names, score_lookup)
-        current_route = [current_name]
-        unused_names.remove(current_name)
-
-        while len(current_route) < route_length and unused_names:
-            next_name = None
-            for candidate_name, _ in adjacency.get(current_route[-1], []):
-                if candidate_name in unused_names:
-                    next_name = candidate_name
-                    break
-
-            if next_name is None:
-                next_name = best_station_for_route(
-                    current_route,
-                    unused_names,
-                    weight_lookup,
-                    score_lookup,
-                )
-
-            current_route.append(next_name)
-            unused_names.remove(next_name)
-
-        stations_in_route = []
-        for station_name in current_route:
-            stations_in_route.append(station_by_name[station_name])
-
-        if len(stations_in_route) == 1 and route_groups:
-            route_groups[-1].extend(stations_in_route)
-        else:
-            route_groups.append(stations_in_route)
-
-    return route_groups
 
 
 def day_type_edges_from_trip_data(trip_data: Any, day_type: str) -> Any:
@@ -419,8 +293,21 @@ def route_district(route_stations: list[Station]) -> str:
     lon_diff = (avg_lon - london_lon) * 0.62
     lat_diff = avg_lat - london_lat
 
-    if abs(lon_diff) < 0.018 and abs(lat_diff) < 0.018:
+    center_threshold = 0.018
+    diagonal_threshold = 0.012
+
+    if abs(lon_diff) < center_threshold and abs(lat_diff) < center_threshold:
         return "Centrum"
+
+    if lat_diff > diagonal_threshold and lon_diff > diagonal_threshold:
+        return "Polnocny Wschod"
+    if lat_diff > diagonal_threshold and lon_diff < -diagonal_threshold:
+        return "Polnocny Zachod"
+    if lat_diff < -diagonal_threshold and lon_diff > diagonal_threshold:
+        return "Poludniowy Wschod"
+    if lat_diff < -diagonal_threshold and lon_diff < -diagonal_threshold:
+        return "Poludniowy Zachod"
+
     if abs(lat_diff) > abs(lon_diff):
         if lat_diff > 0:
             return "Polnoc"
