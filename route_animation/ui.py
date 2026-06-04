@@ -18,6 +18,18 @@ from .models import RouteAnimation, Station
 
 # Proste elementy UI pygame: menu, panele i przyciski.
 
+DISTRICT_LABELS = {
+    "Centrum": "Centrum",
+    "Polnoc": "Północ",
+    "Polnocny Wschod": "Północny Wschód",
+    "Wschod": "Wschód",
+    "Poludniowy Wschod": "Południowy Wschód",
+    "Poludnie": "Południe",
+    "Poludniowy Zachod": "Południowy Zachód",
+    "Zachod": "Zachód",
+    "Polnocny Zachod": "Północny Zachód",
+}
+
 
 def ui_scale(width: int, height: int) -> float:
     raw_scale = min(width / UI_REFERENCE_WIDTH, height / UI_REFERENCE_HEIGHT)
@@ -130,35 +142,8 @@ def draw_text(surface: Any, font: Any, text: str, position: tuple[int, int], col
     surface.blit(image, position)
 
 
-def draw_station_district_legend(
-    pygame: Any,
-    content: Any,
-    font: Any,
-    x: int,
-    y: int,
-    text_width: int,
-    scale: float,
-) -> None:
-    station_y = y + scale_px(10, scale, 8)
-    sample_districts = ["Centrum", "Polnoc", "Wschod", "Poludnie", "Zachod"]
-    dot_radius = scale_px(5, scale, 4)
-    dot_spacing = scale_px(13, scale, 10)
-
-    for index, district_name in enumerate(sample_districts):
-        fill_color, outline_color = DISTRICT_COLORS[district_name]
-        center = (x + dot_radius + index * dot_spacing, station_y)
-        pygame.draw.circle(content, WHITE, center, dot_radius + scale_px(1, scale, 1))
-        pygame.draw.circle(content, fill_color, center, dot_radius)
-        pygame.draw.circle(content, outline_color, center, dot_radius, scale_px(1, scale, 1))
-
-    label_x = x + scale_px(82, scale, 62)
-    draw_text(
-        content,
-        font,
-        fit_text_to_width(font, "Stacje i klastry: kolory obszarów", max(1, text_width - (label_x - x))),
-        (label_x, y),
-        TEXT_COLOR,
-    )
+def district_label(district_name: str) -> str:
+    return DISTRICT_LABELS.get(district_name, district_name)
 
 
 def draw_mode_menu_background(screen: Any, pygame: Any, width: int, height: int) -> None:
@@ -616,6 +601,8 @@ def draw_info_panel(
     panel_x: int,
     panel_width: int,
     height: int,
+    selected_station_count: int | None = None,
+    active_route_station_count: int | None = None,
     scroll: int = 0,
     scale: float = 1.0,
 ) -> int:
@@ -647,12 +634,17 @@ def draw_info_panel(
     total_route_km = total_route_m / 1000
     average_route_km = total_route_km / max(len(prepared_routes), 1)
     info_lines = [
-        f"Stacje: {len(stations)}",
-        f"Trasy: {len(routes)}",
-        f"Rowerzyści: {len(routes)}",
-        f"Śr. trasa na mapie: {average_route_km:.2f} km",
-        f"Prędkość: {speed_kmh:.1f} km/h",
+        f"Stacje na mapie: {len(stations)}",
     ]
+    if selected_station_count is not None and selected_station_count != len(stations):
+        info_lines.append(f"Stacje do tras: {selected_station_count}")
+    info_lines.extend(
+        [
+            f"Trasy: {len(routes)}",
+            f"Rowerzyści: {len(routes)}",
+            f"Prędkość: {speed_kmh:.1f} km/h",
+        ]
+    )
     for line in info_lines:
         draw_text(content, font, fit_text_to_width(font, line, text_width), (x, y), TEXT_COLOR)
         y += scale_px(25, scale, 21)
@@ -685,15 +677,11 @@ def draw_info_panel(
         draw_text(
             content,
             font,
-            fit_text_to_width(font, f"{district_name}: {route_count} tras", text_width - scale_px(88, scale, 64)),
+            fit_text_to_width(font, f"{district_label(district_name)}: {route_count} tras", text_width - scale_px(88, scale, 64)),
             (x + scale_px(88, scale, 64), y),
             TEXT_COLOR,
         )
         y += scale_px(30, scale, 24)
-
-    y += scale_px(16, scale, 12)
-    draw_station_district_legend(pygame, content, font, x, y, text_width, scale)
-    y += scale_px(30, scale, 24)
 
     content_height = min(content_surface_height, y + scale_px(24, scale, 18))
     return blit_scrollable_panel_content(
@@ -721,6 +709,7 @@ def draw_weekday_weekend_panel(
     prepared_weekend_routes: list[dict[str, Any]],
     weekday_stations: list[Station],
     weekend_stations: list[Station],
+    map_station_count: int,
     active_stage: str,
     speed_kmh: float,
     time_scale: float,
@@ -764,11 +753,10 @@ def draw_weekday_weekend_panel(
 
     active_average_route_km = average_route_km(active_prepared_routes)
     info_lines = [
+        f"Stacje na mapie: {map_station_count}",
         f"{station_count_label}: {len(active_stations)}",
         f"{route_count_label}: {len(active_routes)}",
-        f"Śr. trasa na mapie: {active_average_route_km:.2f} km",
-        f"Prędkość: {speed_kmh:.1f} km/h",
-        f"Skala czasu: x{time_scale:.0f}",
+        f"Prędkość: {speed_kmh:.1f} km/h"
     ]
     for line in info_lines:
         draw_text(content, font, fit_text_to_width(font, line, text_width), (x, y), TEXT_COLOR)
@@ -802,15 +790,11 @@ def draw_weekday_weekend_panel(
         draw_text(
             content,
             font,
-            fit_text_to_width(font, f"{district_name}: {route_count} tras", text_width - scale_px(88, scale, 64)),
+            fit_text_to_width(font, f"{district_label(district_name)}: {route_count} tras", text_width - scale_px(88, scale, 64)),
             (x + scale_px(88, scale, 64), y),
             TEXT_COLOR,
         )
         y += scale_px(30, scale, 24)
-
-    y += scale_px(14, scale, 10)
-    draw_station_district_legend(pygame, content, font, x, y, text_width, scale)
-    y += scale_px(30, scale, 24)
 
     content_height = min(content_surface_height, y + scale_px(24, scale, 18))
     return blit_scrollable_panel_content(

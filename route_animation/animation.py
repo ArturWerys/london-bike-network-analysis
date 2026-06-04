@@ -483,6 +483,7 @@ def run_animation(
     cache_dir: Path,
     refresh_map: bool,
     map_zoom: int | None,
+    all_stations: list[Station] | None = None,
     render_scale: float = 1.0,
     station_scores: dict[str, float] | None = None,
     max_real_seconds: float | None = None,
@@ -498,7 +499,12 @@ def run_animation(
     small_font = scaled_font(pygame, 15, scale, min_size=12)
     title_font = scaled_font(pygame, 24, scale, bold=True, min_size=20)
 
-    station_points = [project_polyline([(station.lon, station.lat)])[0] for station in stations]
+    display_station_lookup = {}
+    for station in (all_stations or []) + stations:
+        display_station_lookup[station.name] = station
+    display_stations = list(display_station_lookup.values())
+
+    station_points = [project_polyline([(station.lon, station.lat)])[0] for station in display_stations]
     all_route_points = [point for route in routes for point in project_polyline(route.points_lonlat)]
     map_bounds = map_bounds_for_points(all_route_points + station_points, map_width, height)
     transform = transform_from_bounds(map_bounds, map_width, height)
@@ -508,7 +514,7 @@ def run_animation(
     static_station_screen = [static_transform(point) for point in station_points]
     active_station_names = {station.name for route in routes for station in route.stations}
     static_active_station_screen, static_inactive_station_screen = station_layers(
-        stations,
+        display_stations,
         static_station_screen,
         active_station_names,
         station_scores,
@@ -626,7 +632,9 @@ def run_animation(
             title_font=title_font,
             routes=routes,
             prepared_routes=prepared_routes,
-            stations=stations,
+            stations=display_stations,
+            selected_station_count=len(stations),
+            active_route_station_count=len(active_station_names),
             speed_kmh=speed_kmh,
             panel_x=panel_x,
             panel_width=panel_width,
@@ -897,6 +905,7 @@ def run_weekday_weekend_animation(
             prepared_weekend_routes=prepared_weekend,
             weekday_stations=weekday_stations,
             weekend_stations=weekend_stations,
+            map_station_count=len(stations),
             active_stage=active_stage,
             speed_kmh=speed_kmh,
             time_scale=time_scale,

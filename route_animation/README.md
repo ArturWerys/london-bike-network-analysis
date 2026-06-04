@@ -14,14 +14,15 @@ Ten folder dzieli dawny duzy plik `05_pygame_route_animation.py` na mniejsze cze
 - `animation.py` - silnik animacji: mapa, trasy, ruch rowerzystow.
 - `ui.py` - interfejs `pygame`: menu, ekran ladowania, panele i przyciski.
 
-Domyslnie animacja bierze wszystkie `801` stacji z danych i celuje w okno `2560 x 1440`, dopasowane do ekranu.
+Domyslnie animacja bierze `100` top stacji do wyznaczania tras i celuje w okno `2560 x 1440`, dopasowane do ekranu.
 Statyczna warstwa mapy, tras i stacji jest renderowana w wyzszej jakosci (`--render-scale 1.35`) i wygladzana do rozmiaru okna.
 Widok mapy ma niewielki margines wokol tras i stacji, z mniejszym odstepem u gory i na dole.
 W lewym dolnym rogu mapy widoczna jest srednia trasa na mapie, czyli srednia z aktualnie widocznych tras, z podzialem co `250 m`.
+W trybie 2-letnim wszystkie stacje sa widoczne na mapie jako delikatne tlo, a mocniej zaznaczone sa tylko stacje aktualnie pokazanych tras.
 Stacje sa zaznaczone punktami albo wiekszymi klastrami w kolorach obszarow, ale bez podpisow, zeby mapa byla czytelniejsza.
 Trasy pochodza z najczestszych polaczen stacja->stacja z danych (agregacja obu kierunkow), a geometria kazdej trasy jest liczona jako najkrotsza droga po OSM.
 Po kazdej trasie jedzie dokladnie jeden rowerzysta.
-Zeby mapa nie robila sie "spaghetti", domyslnie pokazywane jest maksymalnie `60` tras (najmocniejsze wedlug ruchu w sieci).
+Zeby mapa nie robila sie "spaghetti", domyslnie pokazywane jest maksymalnie `150` tras (najmocniejsze wedlug ruchu w sieci).
 Gotowe geometrie tras sa zapisywane w cache, wiec kolejne uruchomienie jest lzejsze.
 Legenda i statystyki sa w panelu po prawej stronie, poza mapa.
 Panel pokazuje tez srednia trase na mapie, liczona z aktualnie widocznych tras po drogach OSM.
@@ -47,7 +48,7 @@ Mozesz tez pominac menu i wybrac tryb argumentem:
 .\.venv\Scripts\python.exe .\05_pygame_route_animation.py --mode weekday_weekend
 ```
 
-Jesli komputer ma problem z pelna wersja 2-letnia, mozna tymczasowo odpalic lzejszy wariant:
+Jesli chcesz pokazac wiecej stacji w trybie 2-letnim, mozesz podac ich liczbe recznie:
 
 ```powershell
 .\.venv\Scripts\python.exe .\05_pygame_route_animation.py --station-count 300
@@ -67,7 +68,7 @@ Jesli chcesz ostrzejsza mape i masz zapas pamieci, mozesz podniesc jakosc statyc
 
 Domyslnie animacja jedzie teraz wolniej (`--time-scale 85`), a stacje poza aktywnymi trasami sa rysowane bardziej subtelnie.
 W trybie dni tygodnia/weekendy wszystkie stacje sa widoczne jako delikatne tlo, a aktywne stacje aktualnego etapu sa mocniej podswietlone.
-Porownanie wybiera po `100` top stacji dla dni tygodnia i weekendow, ale nadal pokazuje maksymalnie `60` tras na etap.
+Porownanie wybiera po `100` top stacji dla dni tygodnia i weekendow i pokazuje maksymalnie `150` tras na etap.
 Rozmiar plam stacji skaluje sie z czestotliwoscia odwiedzin dla aktualnego etapu.
 W tym trybie po przelaczeniu etapu poprzedni zestaw tras zostaje delikatnie podswietlony w tle, zeby latwiej porownac przebiegi.
 

@@ -37,7 +37,7 @@ def parse_args() -> argparse.Namespace:
         "--station-count",
         type=int,
         default=DEFAULT_STATION_COUNT,
-        help="Number of stations used when --stations is omitted. Default: all 801 stations.",
+        help=f"Number of stations used when --stations is omitted. Default: {DEFAULT_STATION_COUNT} top stations.",
     )
     parser.add_argument(
         "--max-routes",
@@ -53,7 +53,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--speed-kmh",
         type=float,
-        default=16.0,
+        default=12.0,
         help="Simulated cyclist speed in km/h.",
     )
     parser.add_argument(

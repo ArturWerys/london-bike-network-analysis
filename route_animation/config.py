@@ -9,9 +9,9 @@ STATIONS_FILE = DATA_DIR / "stations_df.parquet"
 EDGES_FILE = DATA_DIR / "edges_df.parquet"
 TRIPS_FILE = DATA_DIR / "final_trip_data.parquet"
 
-# Domyslnie bierzemy wszystkie stacje z pliku danych.
-DEFAULT_STATION_COUNT = 801
-DEFAULT_MAX_ROUTES = 60
+# Domyslnie bierzemy top stacje z sieci, zeby mapa byla czytelna.
+DEFAULT_STATION_COUNT = 100
+DEFAULT_MAX_ROUTES = 150
 DEFAULT_WINDOW_WIDTH = 2560
 DEFAULT_WINDOW_HEIGHT = 1440
 WINDOW_SCREEN_RATIO = 0.94
@@ -46,7 +46,7 @@ TEXT_COLOR = (35, 42, 50)
 WHITE = (255, 255, 255)
 
 COMPARISON_STATION_COUNT = 100
-COMPARISON_MAX_ROUTES = 60
+COMPARISON_MAX_ROUTES = 150
 
 DISTRICT_ORDER = [
     "Centrum",

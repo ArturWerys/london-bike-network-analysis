@@ -319,6 +319,10 @@ def select_routes_for_display(
 
 
 def run_two_year_mode(args, pd, pygame, screen, ox, nx, ctx) -> str:
+    stations_df = load_stations_table(pd)
+    all_station_names = [str(name) for name in stations_df["station_name"].tolist()]
+    all_stations = stations_from_exact_names(stations_df, all_station_names)
+
     if args.stations:
         if len(args.stations) < 2:
             raise ValueError("--stations must contain at least two station names.")
@@ -396,6 +400,7 @@ def run_two_year_mode(args, pd, pygame, screen, ox, nx, ctx) -> str:
         graph=graph,
         stations=stations,
         routes=routes,
+        all_stations=all_stations,
         speed_kmh=args.speed_kmh,
         time_scale=args.time_scale,
         width=args.width,
