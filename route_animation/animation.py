@@ -56,6 +56,7 @@ from .ui import (
 Color = tuple[int, int, int]
 StationScreenPoint = tuple[int, int, float, Color, Color]
 StationCluster = tuple[int, int, int, float, Color, Color]
+SCALE_TICK_INTERVAL_KM = 0.5
 
 
 def as_screen_polylines(polylines: list[list[tuple[float, float]]], transform: Any) -> list[list[tuple[int, int]]]:
@@ -265,6 +266,7 @@ def draw_scale_bar(
     padding_x = scale_px(12, scale, 9)
     padding_y = scale_px(8, scale, 6)
     tick_height = scale_px(8, scale, 6)
+    tick_label_gap = scale_px(5, scale, 4)
     margin_x = scale_px(42, scale, 30)
     bottom_margin = scale_px(46, scale, 34)
     average_label_image = font.render(f"Śr. trasa na mapie: {average_route_km:.2f} km", True, TEXT_COLOR)
@@ -272,8 +274,9 @@ def draw_scale_bar(
     if average_bar_width > max_bar_width:
         average_bar_width = max_bar_width
 
-    panel_width = max(average_bar_width, average_label_image.get_width()) + padding_x * 2
-    panel_height = average_label_image.get_height() + tick_height * 2 + padding_y * 3
+    tick_sample_image = font.render("0,5 km", True, TEXT_COLOR)
+    panel_width = max(average_bar_width, average_label_image.get_width(), tick_sample_image.get_width() * 4) + padding_x * 2
+    panel_height = average_label_image.get_height() + tick_height * 2 + tick_label_gap + tick_sample_image.get_height() + padding_y * 3
     panel_x = min(margin_x, max(scale_px(8, scale, 4), map_width - panel_width - scale_px(8, scale, 4)))
     panel_y = max(scale_px(8, scale, 4), height - bottom_margin - panel_height)
     panel_rect = pygame.Rect(panel_x, panel_y, panel_width, panel_height)
@@ -302,8 +305,10 @@ def draw_scale_bar(
         average_bar_width,
         average_route_km,
         tick_height,
+        tick_label_gap,
         bar_color,
         line_width,
+        font,
         scale,
     )
 
@@ -318,13 +323,15 @@ def draw_segmented_scale_line(
     bar_width: int,
     distance_km: float,
     tick_height: int,
+    tick_label_gap: int,
     bar_color: tuple[int, int, int],
     line_width: int,
+    font: Any,
     scale: float,
 ) -> None:
     pygame.draw.line(panel, bar_color, (bar_x, bar_y), (bar_x + bar_width, bar_y), line_width)
-    tick_positions = scale_tick_positions(bar_width, distance_km)
-    for tick_offset in tick_positions:
+    tick_marks = scale_tick_marks(bar_width, distance_km)
+    for tick_offset, _ in tick_marks:
         tick_x = bar_x + tick_offset
         pygame.draw.line(
             panel,
@@ -334,21 +341,58 @@ def draw_segmented_scale_line(
             scale_px(1, scale, 1),
         )
 
+    label_y = bar_y + tick_height + tick_label_gap
+    min_label_gap = scale_px(8, scale, 6)
+    selected_labels: list[tuple[int, int, Any]] = []
+    for tick_index, (tick_offset, tick_distance_km) in enumerate(tick_marks):
+        is_final_tick = tick_index == len(tick_marks) - 1
+        label_text = format_scale_distance_label(tick_distance_km, include_unit=is_final_tick)
+        label_image = font.render(label_text, True, bar_color)
+        label_x = bar_x + tick_offset - label_image.get_width() // 2
+        label_x = max(0, min(panel.get_width() - label_image.get_width(), label_x))
+        label_right = label_x + label_image.get_width()
 
-def scale_tick_positions(bar_width: int, distance_km: float, tick_interval_km: float = 0.25) -> list[int]:
+        if is_final_tick:
+            while selected_labels and label_x < selected_labels[-1][1] + min_label_gap:
+                selected_labels.pop()
+            selected_labels.append((label_x, label_right, label_image))
+        elif not selected_labels or label_x >= selected_labels[-1][1] + min_label_gap:
+            selected_labels.append((label_x, label_right, label_image))
+
+    for label_x, _, label_image in selected_labels:
+        panel.blit(label_image, (label_x, label_y))
+
+
+def format_scale_distance_label(distance_km: float, include_unit: bool = False) -> str:
+    if include_unit:
+        return f"{distance_km:.2f} km"
+
+    rounded_distance = round(distance_km, 1)
+    if math.isclose(rounded_distance, round(rounded_distance), abs_tol=0.01):
+        label = f"{round(rounded_distance):.0f}"
+    else:
+        label = f"{rounded_distance:.1f}"
+    return label
+
+
+def scale_tick_marks(
+    bar_width: int,
+    distance_km: float,
+    tick_interval_km: float = SCALE_TICK_INTERVAL_KM,
+) -> list[tuple[int, float]]:
     if bar_width <= 0 or distance_km <= 0:
-        return [0]
+        return [(0, 0.0)]
 
-    positions = []
+    marks = []
     tick_count = int(math.floor(distance_km / tick_interval_km))
     for tick_index in range(tick_count + 1):
         tick_distance_km = tick_index * tick_interval_km
-        positions.append(round(bar_width * tick_distance_km / distance_km))
+        marks.append((round(bar_width * tick_distance_km / distance_km), tick_distance_km))
 
-    if positions[-1] != bar_width:
-        positions.append(bar_width)
+    if marks[-1][0] != bar_width:
+        marks.append((bar_width, distance_km))
 
-    return positions
+    return marks
 
 
 def average_prepared_route_km(prepared_routes: list[dict[str, Any]]) -> float:
@@ -906,6 +950,7 @@ def run_weekday_weekend_animation(
             weekday_stations=weekday_stations,
             weekend_stations=weekend_stations,
             map_station_count=len(stations),
+            map_stations=stations,
             active_stage=active_stage,
             speed_kmh=speed_kmh,
             time_scale=time_scale,

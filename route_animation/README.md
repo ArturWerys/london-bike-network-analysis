@@ -17,7 +17,7 @@ Ten folder dzieli dawny duzy plik `05_pygame_route_animation.py` na mniejsze cze
 Domyslnie animacja bierze `100` top stacji do wyznaczania tras i celuje w okno `2560 x 1440`, dopasowane do ekranu.
 Statyczna warstwa mapy, tras i stacji jest renderowana w wyzszej jakosci (`--render-scale 1.35`) i wygladzana do rozmiaru okna.
 Widok mapy ma niewielki margines wokol tras i stacji, z mniejszym odstepem u gory i na dole.
-W lewym dolnym rogu mapy widoczna jest srednia trasa na mapie, czyli srednia z aktualnie widocznych tras, z podzialem co `250 m`.
+W lewym dolnym rogu mapy widoczna jest srednia trasa na mapie, czyli srednia z aktualnie widocznych tras, z podpisana podzialka co `0,5 km`.
 W trybie 2-letnim wszystkie stacje sa widoczne na mapie jako delikatne tlo, a mocniej zaznaczone sa tylko stacje aktualnie pokazanych tras.
 Stacje sa zaznaczone punktami albo wiekszymi klastrami w kolorach obszarow, ale bez podpisow, zeby mapa byla czytelniejsza.
 Trasy pochodza z najczestszych polaczen stacja->stacja z danych (agregacja obu kierunkow), a geometria kazdej trasy jest liczona jako najkrotsza droga po OSM.
