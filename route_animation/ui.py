@@ -13,6 +13,7 @@ from .config import (
     UI_REFERENCE_WIDTH,
     WHITE,
 )
+from .data import route_district
 from .models import RouteAnimation, Station
 
 
@@ -144,6 +145,25 @@ def draw_text(surface: Any, font: Any, text: str, position: tuple[int, int], col
 
 def district_label(district_name: str) -> str:
     return DISTRICT_LABELS.get(district_name, district_name)
+
+
+def draw_legend_description(
+    content: Any,
+    font: Any,
+    x: int,
+    y: int,
+    text_width: int,
+    scale: float,
+) -> int:
+    lines = [
+        "Kolor odpowiada części miasta,",
+        "w której znajduje się stacja.",
+        "Liczba mówi o ich ilości.",
+    ]
+    for line in lines:
+        draw_text(content, font, fit_text_to_width(font, line, text_width), (x, y), TEXT_COLOR)
+        y += scale_px(23, scale, 19)
+    return y
 
 
 def draw_mode_menu_background(screen: Any, pygame: Any, width: int, height: int) -> None:
@@ -396,10 +416,11 @@ def show_loading_screen(
     pygame.event.pump()
 
 
-def route_counts_by_district(routes: list[RouteAnimation]) -> dict[str, int]:
+def station_counts_by_district(stations: list[Station]) -> dict[str, int]:
     counts = {}
-    for route in routes:
-        counts[route.district_name] = counts.get(route.district_name, 0) + 1
+    for station in stations:
+        district_name = route_district([station])
+        counts[district_name] = counts.get(district_name, 0) + 1
     return counts
 
 
@@ -651,12 +672,14 @@ def draw_info_panel(
 
     y += scale_px(16, scale, 12)
     draw_text(content, title_font, "Legenda", (x, y), TEXT_COLOR)
-    y += scale_px(38, scale, 30)
+    y += scale_px(32, scale, 26)
+    y = draw_legend_description(content, font, x, y, text_width, scale)
+    y += scale_px(8, scale, 6)
 
-    route_counts = route_counts_by_district(routes)
+    station_counts = station_counts_by_district(stations)
     for district_name in DISTRICT_ORDER:
-        route_count = route_counts.get(district_name, 0)
-        if route_count == 0:
+        station_count = station_counts.get(district_name, 0)
+        if station_count == 0:
             continue
 
         route_color, bike_color = DISTRICT_COLORS[district_name]
@@ -677,7 +700,7 @@ def draw_info_panel(
         draw_text(
             content,
             font,
-            fit_text_to_width(font, f"{district_label(district_name)}: {route_count} tras", text_width - scale_px(88, scale, 64)),
+            fit_text_to_width(font, f"{district_label(district_name)}: {station_count}", text_width - scale_px(88, scale, 64)),
             (x + scale_px(88, scale, 64), y),
             TEXT_COLOR,
         )
@@ -710,6 +733,7 @@ def draw_weekday_weekend_panel(
     weekday_stations: list[Station],
     weekend_stations: list[Station],
     map_station_count: int,
+    map_stations: list[Station],
     active_stage: str,
     speed_kmh: float,
     time_scale: float,
@@ -764,12 +788,14 @@ def draw_weekday_weekend_panel(
 
     y += scale_px(12, scale, 9)
     draw_text(content, title_font, "Legenda", (x, y), TEXT_COLOR)
-    y += scale_px(36, scale, 28)
+    y += scale_px(30, scale, 24)
+    y = draw_legend_description(content, font, x, y, text_width, scale)
+    y += scale_px(6, scale, 5)
 
-    route_counts = route_counts_by_district(active_routes)
+    station_counts = station_counts_by_district(map_stations)
     for district_name in DISTRICT_ORDER:
-        route_count = route_counts.get(district_name, 0)
-        if route_count == 0:
+        station_count = station_counts.get(district_name, 0)
+        if station_count == 0:
             continue
 
         route_color, bike_color = DISTRICT_COLORS[district_name]
@@ -790,7 +816,7 @@ def draw_weekday_weekend_panel(
         draw_text(
             content,
             font,
-            fit_text_to_width(font, f"{district_label(district_name)}: {route_count} tras", text_width - scale_px(88, scale, 64)),
+            fit_text_to_width(font, f"{district_label(district_name)}: {station_count}", text_width - scale_px(88, scale, 64)),
             (x + scale_px(88, scale, 64), y),
             TEXT_COLOR,
         )
