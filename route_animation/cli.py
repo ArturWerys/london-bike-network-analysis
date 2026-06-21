@@ -8,6 +8,7 @@ from .config import (
     DEFAULT_WINDOW_HEIGHT,
     DEFAULT_WINDOW_WIDTH,
     DEFAULT_STATION_COUNT,
+    EDGES_FILE,
     MAX_RENDER_SCALE,
     WINDOW_SCREEN_RATIO,
 )
@@ -30,7 +31,7 @@ def parse_args() -> argparse.Namespace:
         metavar="STATION",
         help=(
             "Optional station names from Data/stations_df.parquet. "
-            "If omitted, top stations are selected from Data/edges_df.parquet."
+            f"If omitted, top stations are selected from Data/{EDGES_FILE.name}."
         ),
     )
     parser.add_argument(
@@ -53,8 +54,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--speed-kmh",
         type=float,
-        default=12.0,
-        help="Simulated cyclist speed in km/h.",
+        default=10.0,
+        help="Simulated cyclist speed in km/h. Default: 10.0.",
     )
     parser.add_argument(
         "--time-scale",
@@ -130,7 +131,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--mode",
-        choices=["two_years", "weekday_weekend"],
+        choices=["two_years", "two_years_heatmap", "weekday_weekend"],
         default=None,
         help="Run a specific mode. If omitted, a short menu is shown at startup.",
     )

@@ -1,10 +1,27 @@
 from pathlib import Path
+import sys
 
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 import numpy as np
 import pandas as pd
+
+
+def _apply_project_plot_style():
+    current = Path(__file__).resolve()
+    for path in [current.parent, *current.parents]:
+        if (path / "plot_style.py").exists():
+            if str(path) not in sys.path:
+                sys.path.insert(0, str(path))
+
+            import plot_style
+
+            plot_style.apply_montserrat_style()
+            return
+
+
+_apply_project_plot_style()
 
 
 WEEKDAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
@@ -375,10 +392,10 @@ def plot_duration_log_probability(
         ax.grid(True, axis="x", alpha=0.2, which="major")
         ax.legend()
 
-    axes[0].set_ylabel("P(x)")
+    axes[0].set_ylabel("P(t)")
 
     title = (
-        "Wykresy prawdopodobieństwa czasu przejazdu P(x) "
+        "Wykresy prawdopodobieństwa czasu przejazdu P(t) "
         f"z binowaniem logarytmicznym ({lower_limit}-{upper_limit} min)"
     )
     if title_prefix:
@@ -518,10 +535,10 @@ def plot_duration_tail_fit(
     ax.set_xlim(lower_limit, upper_limit)
 
     ax.set_xlabel("Czas przejazdu [min]")
-    ax.set_ylabel("P(x)")
+    ax.set_ylabel("P(t)")
 
     title = (
-        "Dopasowanie ogona rozkładu czasu przejazdu P(x) "
+        "Dopasowanie ogona rozkładu czasu przejazdu P(t) "
         f"(a = {a_value}, zakres dopasowania {x_min}-{x_max} min)"
     )
     if title_prefix:
@@ -1003,8 +1020,8 @@ def plot_duration_log_probability_dataset_comparison(
         ax.grid(True, axis="x", alpha=0.2, which="major")
         ax.legend()
 
-    axes[0].set_ylabel("P(x)")
-    title = "Wykresy prawdopodobieństwa czasu przejazdu P(x) z binowaniem logarytmicznym"
+    axes[0].set_ylabel("P(t)")
+    title = "Wykresy prawdopodobieństwa czasu przejazdu P(t) z binowaniem logarytmicznym"
     range_text = title_range_text(lower_limit, upper_limit, range_label)
     if range_text:
         title = f"{title}\n{range_text}, a = {a_value}"
@@ -1157,13 +1174,13 @@ def plot_duration_log_probability_dataset_overlay(
     ax.set_yscale("log")
     ax.set_xlim(lower_limit, upper_limit)
     ax.set_xlabel("Czas przejazdu [min]")
-    ax.set_ylabel("P(x)")
-    title = "Nałożone P(x) dla dwóch zbiorów danych"
+    ax.set_ylabel("P(t)")
+    title = "Porównanie P(t) dla dwóch zbiorów danych,"
     range_text = title_range_text(lower_limit, upper_limit, range_label)
     if range_text:
-        title = f"{title}\n{range_text}, a = {a_value}"
+        title = f"{title}\n{range_text}"
     else:
-        title = f"{title}\na = {a_value}"
+        title = f"{title}\n "
 
     ax.set_title(title, fontsize=14)
     ax.grid(True, axis="y", alpha=0.2, which="major")
@@ -1211,12 +1228,12 @@ def plot_speed_log_probability_dataset_overlay(
     ax.set_xlim(min_speed, max_speed)
     ax.set_xlabel("Prędkość w linii prostej [km/h]")
     ax.set_ylabel("P(v)")
-    title = "Nałożone P(v) dla dwóch zbiorów danych"
+    title = "Porównanie P(v) dla dwóch zbiorów danych,"
     range_text = title_range_text(range_label=range_label)
     if range_text:
-        title = f"{title}\n{range_text}, a = {a_value}"
+        title = f"{title}\n{range_text}"
     else:
-        title = f"{title}\na = {a_value}"
+        title = f"{title}\n"
 
     ax.set_title(title, fontsize=14)
     ax.grid(True, axis="y", alpha=0.2, which="major")

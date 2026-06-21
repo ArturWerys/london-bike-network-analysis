@@ -1,0 +1,8 @@
+font.family: sans-serif
+font.sans-serif: Montserrat, DejaVu Sans, Arial, Helvetica, Liberation Sans, sans-serif
+figure.dpi: 180
+savefig.dpi: 300
+axes.unicode_minus: False
+pdf.fonttype: 42
+ps.fonttype: 42
+svg.fonttype: none
