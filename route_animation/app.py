@@ -3,12 +3,16 @@ from __future__ import annotations
 import json
 import os
 
-from .animation import run_animation, run_weekday_weekend_animation
+from .animation import run_animation, run_heatmap_scope_animation, run_weekday_weekend_animation
 from .cache import graph_cache_path, routes_cache_path
 from .cli import parse_args
 from .config import (
     COMPARISON_MAX_ROUTES,
     COMPARISON_STATION_COUNT,
+    DEFAULT_HEATMAP_MAX_ROUTES,
+    DEFAULT_HEATMAP_STATION_COUNT,
+    DEFAULT_STATION_COUNT,
+    DEFAULT_MAX_ROUTES,
     DEFAULT_WINDOW_HEIGHT,
     DEFAULT_WINDOW_WIDTH,
     MAX_RENDER_SCALE,
@@ -17,6 +21,7 @@ from .config import (
     WINDOW_SCREEN_RATIO,
 )
 from .data import (
+    apply_heatmap_route_styles,
     load_station_network_edges,
     load_stations_table,
     print_station_matches,
@@ -124,8 +129,8 @@ def choose_mode(selected_mode: str | None, pygame, screen, width: int, height: i
         return selected_mode
 
     if os.environ.get("SDL_VIDEODRIVER", "").lower() == "dummy":
-        print("No interactive input detected, default mode: two_years")
-        return "two_years"
+        print("No interactive input detected, default mode: two_years_heatmap")
+        return "two_years_heatmap"
 
     return run_mode_menu(screen, pygame, width, height)
 
@@ -179,6 +184,19 @@ def load_routes_from_cache(cache_path, stations) -> list[RouteAnimation] | None:
         )
 
     return routes
+
+
+def load_cached_graph_for_render(ox, graph_path: Path, cache_dir: Path, bbox: tuple[float, float, float, float]):
+    if graph_path.exists():
+        return load_or_download_graph(ox, graph_path, bbox, refresh_osm=False)
+
+    fallback_graph_path = cache_dir / "road_distances" / "london_bike_network.graphml"
+    if fallback_graph_path.exists():
+        print(f"Specific cached OSM graph not found. Loading fallback graph: {fallback_graph_path}")
+        return load_or_download_graph(ox, fallback_graph_path, bbox, refresh_osm=False)
+
+    print("Cached OSM graph not found. Basemap tiles will be used if available.")
+    return None
 
 
 def save_routes_to_cache(cache_path, routes: list[RouteAnimation]) -> None:
@@ -318,7 +336,7 @@ def select_routes_for_display(
     return selected_routes
 
 
-def run_two_year_mode(args, pd, pygame, screen, ox, nx, ctx) -> str:
+def run_two_year_mode(args, pd, pygame, screen, ox, nx, ctx, heatmap: bool = False) -> str:
     stations_df = load_stations_table(pd)
     all_station_names = [str(name) for name in stations_df["station_name"].tolist()]
     all_stations = stations_from_exact_names(stations_df, all_station_names)
@@ -330,7 +348,10 @@ def run_two_year_mode(args, pd, pygame, screen, ox, nx, ctx) -> str:
     else:
         if args.station_count < 2:
             raise ValueError("--station-count must be at least 2.")
-        stations = top_stations_from_network(pd, args.station_count)
+        station_count = args.station_count
+        if heatmap and args.station_count == DEFAULT_STATION_COUNT:
+            station_count = DEFAULT_HEATMAP_STATION_COUNT
+        stations = top_stations_from_network(pd, station_count)
 
     station_lookup = {}
     for station in stations:
@@ -338,11 +359,19 @@ def run_two_year_mode(args, pd, pygame, screen, ox, nx, ctx) -> str:
 
     bbox = bbox_around_stations(stations, args.buffer_meters)
     graph_path = graph_cache_path(args.cache_dir, bbox, stations)
+    route_cache_label = (
+        "two_years_without_discontinuities_undirected_pairs_v1"
+        if heatmap
+        else "two_years_without_discontinuities_pairs_v2"
+    )
+    max_routes = args.max_routes
+    if heatmap and args.max_routes == DEFAULT_MAX_ROUTES:
+        max_routes = DEFAULT_HEATMAP_MAX_ROUTES
     route_cache = routes_cache_path(
         args.cache_dir,
         stations,
         graph_path.name,
-        cache_label="two_years_pairs_v2",
+        cache_label=route_cache_label,
     )
     force_rebuild_routes = args.refresh_routes or args.refresh_osm
     routes = None if force_rebuild_routes else load_routes_from_cache(route_cache, stations)
@@ -351,19 +380,21 @@ def run_two_year_mode(args, pd, pygame, screen, ox, nx, ctx) -> str:
     station_score_lookup = None
 
     if routes is None:
-        graph = load_or_download_graph(
-            ox,
-            graph_path,
-            bbox,
-            args.refresh_osm,
-        )
+        graph = None if args.refresh_osm else load_cached_graph_for_render(ox, graph_path, args.cache_dir, bbox)
+        if graph is None:
+            graph = load_or_download_graph(
+                ox,
+                graph_path,
+                bbox,
+                args.refresh_osm,
+            )
 
         station_nodes = nearest_graph_nodes(graph, stations)
         station_node_lookup = {}
         for station, node in zip(stations, station_nodes):
             station_node_lookup[station.name] = node
 
-        candidate_limit = max(args.max_routes * 3, 60)
+        candidate_limit = max(max_routes * 3, 60)
         edges_df = load_station_network_edges(pd)
         station_scores = station_scores_from_edges(edges_df)
         station_score_lookup = {str(name): float(score) for name, score in station_scores.items()}
@@ -384,14 +415,19 @@ def run_two_year_mode(args, pd, pygame, screen, ox, nx, ctx) -> str:
         )
         save_routes_to_cache(route_cache, routes)
     else:
-        print("Routes loaded from cache. Skipping OSM graph load.")
+        print("Routes loaded from cache.")
+        graph = load_cached_graph_for_render(ox, graph_path, args.cache_dir, bbox)
         edges_df = load_station_network_edges(pd)
         station_scores = station_scores_from_edges(edges_df)
         station_score_lookup = {str(name): float(score) for name, score in station_scores.items()}
 
-    routes = select_routes_for_display(routes, args.max_routes, "two_years")
+    mode_label = "two_years_heatmap" if heatmap else "two_years"
+    routes = select_routes_for_display(routes, max_routes, mode_label)
+    if heatmap:
+        routes = apply_heatmap_route_styles(routes)
 
-    print_summary(stations, routes, label="Animacja 2 lata")
+    summary_label = "Animacja 2 lata" if heatmap else "Dawna animacja 2 lata"
+    print_summary(stations, routes, label=summary_label)
 
     return run_animation(
         ctx=ctx,
@@ -410,6 +446,193 @@ def run_two_year_mode(args, pd, pygame, screen, ox, nx, ctx) -> str:
         map_zoom=args.map_zoom,
         render_scale=args.render_scale,
         station_scores=station_score_lookup,
+        color_mode="heatmap" if heatmap else "district",
+        max_real_seconds=args.max_real_seconds,
+    )
+
+
+def run_heatmap_scope_mode(args, pd, pygame, screen, ox, nx, ctx) -> str:
+    stations_df = load_stations_table(pd)
+    all_station_names = [str(name) for name in stations_df["station_name"].tolist()]
+    all_stations = stations_from_exact_names(stations_df, all_station_names)
+
+    if args.station_count < 2:
+        raise ValueError("--station-count must be at least 2.")
+
+    station_count = args.station_count
+    if args.station_count == DEFAULT_STATION_COUNT:
+        station_count = DEFAULT_HEATMAP_STATION_COUNT
+
+    max_routes = args.max_routes
+    if args.max_routes == DEFAULT_MAX_ROUTES:
+        max_routes = DEFAULT_HEATMAP_MAX_ROUTES
+
+    full_edges = load_station_network_edges(pd)
+    full_scores = station_scores_from_edges(full_edges)
+    full_score_lookup = {str(name): float(score) for name, score in full_scores.items()}
+
+    if args.stations:
+        if len(args.stations) < 2:
+            raise ValueError("--stations must contain at least two station names.")
+        full_stations = selected_stations(pd, args.stations)
+    else:
+        full_stations = top_stations_from_network(pd, station_count)
+
+    summary = weekday_weekend_summary(pd, args.cache_dir, top_n=station_count)
+    weekday_scores = station_scores_from_edges(summary["weekday_edges"])
+    weekend_scores = station_scores_from_edges(summary["weekend_edges"])
+    weekday_score_lookup = {str(name): float(score) for name, score in weekday_scores.items()}
+    weekend_score_lookup = {str(name): float(score) for name, score in weekend_scores.items()}
+
+    weekday_stations = stations_from_exact_names(stations_df, summary["weekday_top_names"])
+    weekend_stations = stations_from_exact_names(stations_df, summary["weekend_top_names"])
+
+    print_top_preview("pełne 2 lata", [station.name for station in full_stations])
+    print_top_preview("dni robocze", summary["weekday_top_names"])
+    print_top_preview("weekendy", summary["weekend_top_names"])
+
+    map_station_lookup = {}
+    for station in full_stations + weekday_stations + weekend_stations:
+        map_station_lookup[station.name] = station
+    map_stations = list(map_station_lookup.values())
+
+    if len(map_stations) < 2:
+        raise RuntimeError("Not enough stations to run the heatmap animation.")
+
+    bbox = bbox_around_stations(map_stations, args.buffer_meters)
+    graph_path = graph_cache_path(args.cache_dir, bbox, map_stations)
+    force_rebuild_routes = args.refresh_routes or args.refresh_osm
+    candidate_limit = max(max_routes * 3, 60)
+
+    scope_builders = [
+        {
+            "key": "full",
+            "label": "Pełne 2 lata",
+            "button_label": "2 lata",
+            "stations": full_stations,
+            "edges": full_edges,
+            "station_scores": full_score_lookup,
+            "cache_label": "heatmap_full_without_discontinuities_undirected_pairs_v1",
+            "route_prefix": "2 lata",
+            "stations_label": "Stacje do tras",
+            "routes_label": "Trasy",
+        },
+        {
+            "key": "weekday",
+            "label": "Dni tygodnia",
+            "button_label": "Dni tyg.",
+            "stations": weekday_stations,
+            "edges": summary["weekday_edges"],
+            "station_scores": weekday_score_lookup,
+            "cache_label": "heatmap_weekday_without_discontinuities_undirected_pairs_v1",
+            "route_prefix": "Dni tyg.",
+            "stations_label": "Stacje dni tyg.",
+            "routes_label": "Trasy dni tyg.",
+        },
+        {
+            "key": "weekend",
+            "label": "Weekendy",
+            "button_label": "Weekendy",
+            "stations": weekend_stations,
+            "edges": summary["weekend_edges"],
+            "station_scores": weekend_score_lookup,
+            "cache_label": "heatmap_weekend_without_discontinuities_undirected_pairs_v1",
+            "route_prefix": "Weekend",
+            "stations_label": "Stacje weekendów",
+            "routes_label": "Trasy weekendów",
+        },
+    ]
+
+    route_caches = {}
+    scope_routes: dict[str, list[RouteAnimation] | None] = {}
+    for scope in scope_builders:
+        route_caches[scope["key"]] = routes_cache_path(
+            args.cache_dir,
+            scope["stations"],
+            graph_path.name,
+            cache_label=scope["cache_label"],
+        )
+        if force_rebuild_routes:
+            scope_routes[scope["key"]] = None
+        else:
+            scope_routes[scope["key"]] = load_routes_from_cache(route_caches[scope["key"]], scope["stations"])
+
+    graph = None
+    if any(routes is None for routes in scope_routes.values()):
+        graph = load_or_download_graph(
+            ox,
+            graph_path,
+            bbox,
+            args.refresh_osm,
+        )
+        map_station_nodes = nearest_graph_nodes(graph, map_stations)
+        station_node_lookup = {}
+        for station, node in zip(map_stations, map_station_nodes):
+            station_node_lookup[station.name] = node
+
+        for scope in scope_builders:
+            scope_key = scope["key"]
+            if scope_routes[scope_key] is not None:
+                continue
+
+            station_lookup = {}
+            for station in scope["stations"]:
+                station_lookup[station.name] = station
+
+            station_pairs = top_station_pairs_from_edges(
+                scope["edges"],
+                set(station_lookup),
+                candidate_limit,
+            )
+            routes = build_routes_from_station_pairs(
+                ox,
+                nx,
+                graph,
+                station_lookup=station_lookup,
+                station_node_lookup=station_node_lookup,
+                station_pairs=station_pairs,
+                route_prefix=scope["route_prefix"],
+            )
+            save_routes_to_cache(route_caches[scope_key], routes)
+            scope_routes[scope_key] = routes
+    else:
+        print("Heatmap routes loaded from cache.")
+        graph = load_cached_graph_for_render(ox, graph_path, args.cache_dir, bbox)
+
+    scopes = []
+    for scope in scope_builders:
+        routes = scope_routes[scope["key"]] or []
+        routes = select_routes_for_display(routes, max_routes, scope["key"])
+        routes = apply_heatmap_route_styles(routes)
+        print_summary(scope["stations"], routes, label=scope["label"])
+        scopes.append(
+            {
+                "key": scope["key"],
+                "label": scope["label"],
+                "button_label": scope["button_label"],
+                "stations": scope["stations"],
+                "routes": routes,
+                "station_scores": scope["station_scores"],
+                "stations_label": scope["stations_label"],
+                "routes_label": scope["routes_label"],
+            }
+        )
+
+    return run_heatmap_scope_animation(
+        ctx=ctx,
+        pygame=pygame,
+        screen=screen,
+        graph=graph,
+        scopes=scopes,
+        all_stations=all_stations,
+        speed_kmh=args.speed_kmh,
+        time_scale=args.time_scale,
+        width=args.width,
+        height=args.height,
+        cache_dir=args.cache_dir,
+        refresh_map=args.refresh_map,
+        map_zoom=args.map_zoom,
+        render_scale=args.render_scale,
         max_real_seconds=args.max_real_seconds,
     )
 
@@ -445,13 +668,13 @@ def run_weekday_weekend_mode(args, pd, pygame, screen, ox, nx, ctx) -> str:
         args.cache_dir,
         weekday_stations,
         graph_path.name,
-        cache_label="weekday_pairs_v3",
+        cache_label="weekday_without_discontinuities_pairs_v3",
     )
     weekend_cache = routes_cache_path(
         args.cache_dir,
         weekend_stations,
         graph_path.name,
-        cache_label="weekend_pairs_v3",
+        cache_label="weekend_without_discontinuities_pairs_v3",
     )
 
     force_rebuild_routes = args.refresh_routes or args.refresh_osm
@@ -523,11 +746,14 @@ def run_weekday_weekend_mode(args, pd, pygame, screen, ox, nx, ctx) -> str:
             )
             save_routes_to_cache(weekend_cache, weekend_routes)
     else:
-        print("Weekday and weekend routes loaded from cache. Skipping OSM graph load.")
+        print("Weekday and weekend routes loaded from cache.")
+        graph = load_cached_graph_for_render(ox, graph_path, args.cache_dir, bbox)
 
     weekend_weekday_limit = min(args.max_routes, COMPARISON_MAX_ROUTES)
     weekday_routes = select_routes_for_display(weekday_routes, weekend_weekday_limit, "weekday")
     weekend_routes = select_routes_for_display(weekend_routes, weekend_weekday_limit, "weekend")
+    weekday_routes = apply_heatmap_route_styles(weekday_routes)
+    weekend_routes = apply_heatmap_route_styles(weekend_routes)
 
     print_summary(weekday_stations, weekday_routes, label="Dni robocze")
     print_summary(weekend_stations, weekend_routes, label="Weekendy")
@@ -593,8 +819,17 @@ def main() -> None:
                 pygame,
                 args.width,
                 args.height,
-                title="Ladowanie 2 lata...",
-                subtitle="Przygotowuje trasy i mape Londynu",
+                title="Ładowanie animacji ...",
+                subtitle="Przygotowuję trasy i mapę Londynu",
+            )
+        elif mode == "two_years_heatmap":
+            show_loading_screen(
+                screen,
+                pygame,
+                args.width,
+                args.height,
+                title="Ładowanie animacji ...",
+                subtitle="Przygotowuję trasy i mapę Londynu",
             )
         elif mode == "weekday_weekend":
             show_loading_screen(
@@ -602,14 +837,16 @@ def main() -> None:
                 pygame,
                 args.width,
                 args.height,
-                title="Ladowanie dni tygodnia/weekendy...",
-                subtitle="Przygotowuje porownanie i mape Londynu",
+                title="Ładowanie animacji ...",
+                subtitle="Przygotowuję trasy i mapę Londynu",
             )
 
         if mode == "two_years":
             exit_action = run_two_year_mode(args, pd, pygame, screen, ox, nx, ctx)
+        elif mode == "two_years_heatmap":
+            exit_action = run_heatmap_scope_mode(args, pd, pygame, screen, ox, nx, ctx)
         elif mode == "weekday_weekend":
-            exit_action = run_weekday_weekend_mode(args, pd, pygame, screen, ox, nx, ctx)
+            exit_action = run_heatmap_scope_mode(args, pd, pygame, screen, ox, nx, ctx)
         else:
             raise ValueError(f"Unsupported mode: {mode}")
 

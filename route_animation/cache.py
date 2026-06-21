@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
+from .config import TRIP_DATA_SCOPE_CACHE_LABEL
 from .models import Station
 
 
@@ -47,6 +48,7 @@ def routes_cache_path(
         "stations": [station.name for station in stations],
         "graph": graph_cache_name,
         "label": cache_label,
+        "data_scope": TRIP_DATA_SCOPE_CACHE_LABEL,
         "version": "station-pairs-v3-nine-districts",
     }
     digest = hashlib.sha1(repr(key_data).encode("utf-8")).hexdigest()[:12]

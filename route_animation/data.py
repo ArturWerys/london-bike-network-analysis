@@ -1,13 +1,24 @@
 from __future__ import annotations
 
 import json
+import math
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
-from .config import DISTRICT_COLORS, EDGES_FILE, STATIONS_FILE, TRIPS_FILE
-from .models import Station
+from .config import (
+    DISTRICT_COLORS,
+    EDGES_FILE,
+    HEATMAP_COLORS,
+    STATIONS_FILE,
+    TRIPS_FILE,
+    TRIP_DATA_SCOPE_CACHE_LABEL,
+    TRIP_DURATION_MINUTES_MAX,
+    TRIP_DURATION_MINUTES_MIN,
+)
+from .models import RouteAnimation, Station
 
 
 # Dane projektu: stacje i Twoja zbudowana siec przejazdow stacja-stacja.
@@ -21,14 +32,57 @@ def load_stations_table(pd: Any) -> Any:
 
 def load_station_network_edges(pd: Any) -> Any:
     if not EDGES_FILE.exists():
-        raise FileNotFoundError(f"Station network file not found: {EDGES_FILE}")
+        trip_data = load_trip_data(
+            pd,
+            columns=[
+                "start_station_id",
+                "start_station_name",
+                "end_station_id",
+                "end_station_name",
+            ],
+        )
+        edges_df = build_station_network_edges(trip_data)
+        edges_df.to_parquet(EDGES_FILE, index=False)
+        return edges_df
     return pd.read_parquet(EDGES_FILE)
 
 
 def load_trip_data(pd: Any, columns: list[str] | None = None) -> Any:
     if not TRIPS_FILE.exists():
         raise FileNotFoundError(f"Trip file not found: {TRIPS_FILE}")
-    return pd.read_parquet(TRIPS_FILE, columns=columns)
+
+    read_columns = columns
+    if columns is not None and "total_duration_minutes" not in columns:
+        read_columns = [*columns, "total_duration_minutes"]
+
+    trip_data = pd.read_parquet(TRIPS_FILE, columns=read_columns)
+    filtered_trip_data = trip_data.loc[
+        trip_data["total_duration_minutes"].between(
+            TRIP_DURATION_MINUTES_MIN,
+            TRIP_DURATION_MINUTES_MAX,
+            inclusive="both",
+        )
+    ].copy()
+
+    if columns is not None:
+        return filtered_trip_data.loc[:, columns]
+
+    return filtered_trip_data
+
+
+def build_station_network_edges(trip_data: Any) -> Any:
+    return (
+        trip_data.groupby(
+            [
+                "start_station_id",
+                "start_station_name",
+                "end_station_id",
+                "end_station_name",
+            ]
+        )
+        .agg(weight=("start_station_id", "count"))
+        .reset_index()
+    )
 
 
 def station_key(name: str) -> str:
@@ -111,6 +165,69 @@ def station_scores_from_network(pd: Any) -> Any:
     return station_scores_from_edges(edges_df)
 
 
+def value_bounds(values: list[float] | tuple[float, ...]) -> tuple[float, float]:
+    positive_values = [float(value) for value in values if float(value) > 0]
+    if not positive_values:
+        return 0.0, 1.0
+
+    min_value = min(positive_values)
+    max_value = max(positive_values)
+    if max_value <= min_value:
+        max_value = min_value + 1.0
+    return min_value, max_value
+
+
+def heatmap_fraction(value: float, min_value: float, max_value: float) -> float:
+    low = math.log1p(max(0.0, min_value))
+    high = math.log1p(max(0.0, max_value))
+    if high <= low:
+        return 0.5
+
+    fraction = (math.log1p(max(0.0, value)) - low) / (high - low)
+    return max(0.0, min(1.0, fraction))
+
+
+def heatmap_color_at_fraction(fraction: float) -> tuple[int, int, int]:
+    fraction = max(0.0, min(1.0, fraction))
+    if len(HEATMAP_COLORS) == 1:
+        return HEATMAP_COLORS[0]
+
+    scaled = fraction * (len(HEATMAP_COLORS) - 1)
+    left_index = int(math.floor(scaled))
+    right_index = min(len(HEATMAP_COLORS) - 1, left_index + 1)
+    blend = scaled - left_index
+    left_color = HEATMAP_COLORS[left_index]
+    right_color = HEATMAP_COLORS[right_index]
+    return tuple(
+        int(round(left + (right - left) * blend))
+        for left, right in zip(left_color, right_color)
+    )
+
+
+def heatmap_color(value: float, min_value: float, max_value: float) -> tuple[int, int, int]:
+    return heatmap_color_at_fraction(heatmap_fraction(value, min_value, max_value))
+
+
+def darker_color(color: tuple[int, int, int], factor: float = 0.58) -> tuple[int, int, int]:
+    return tuple(max(0, min(255, int(round(channel * factor)))) for channel in color)
+
+
+def apply_heatmap_route_styles(routes: list[RouteAnimation]) -> list[RouteAnimation]:
+    min_weight, max_weight = value_bounds([float(route.station_network_weight) for route in routes])
+    styled_routes = []
+    for route in routes:
+        route_color = heatmap_color(route.station_network_weight, min_weight, max_weight)
+        styled_routes.append(
+            replace(
+                route,
+                district_name="Heatmap",
+                route_color=route_color,
+                bike_color=route_color,
+            )
+        )
+    return styled_routes
+
+
 def top_stations_from_network(pd: Any, station_count: int) -> list[Station]:
     stations_df = load_stations_table(pd)
     station_scores = station_scores_from_network(pd)
@@ -133,6 +250,7 @@ def top_station_pairs_from_edges(
     edges_df: Any,
     allowed_station_names: set[str] | None,
     max_pairs: int,
+    directed: bool = False,
 ) -> list[tuple[str, str, int]]:
     if max_pairs < 1:
         return []
@@ -148,6 +266,11 @@ def top_station_pairs_from_edges(
         return []
 
     directed_weights = filtered.groupby(["start_station_name", "end_station_name"])["weight"].sum()
+    if directed:
+        station_pairs: list[tuple[str, str, int]] = []
+        for (start_name, end_name), pair_weight in directed_weights.sort_values(ascending=False).head(max_pairs).items():
+            station_pairs.append((str(start_name), str(end_name), int(pair_weight)))
+        return station_pairs
 
     start_names = filtered["start_station_name"].astype(str)
     end_names = filtered["end_station_name"].astype(str)
@@ -236,7 +359,7 @@ def stationary_top_station_names(edges_df: Any, top_n: int) -> list[str]:
 
 
 def weekday_weekend_summary(pd: Any, cache_dir: Path, top_n: int) -> dict[str, Any]:
-    summary_dir = cache_dir / "weekday_weekend"
+    summary_dir = cache_dir / f"weekday_weekend_{TRIPS_FILE.stem}_{TRIP_DATA_SCOPE_CACHE_LABEL}"
     summary_dir.mkdir(parents=True, exist_ok=True)
 
     weekday_edges_path = summary_dir / "edges_weekday.parquet"
