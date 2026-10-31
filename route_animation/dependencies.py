@@ -12,7 +12,7 @@ def _require_module(import_name: str, package_name: str | None = None) -> Any:
         return __import__(import_name)
     except ImportError:
         package = package_name or import_name
-        install_cmd = f".\\.venv\\Scripts\\python.exe -m pip install {package}"
+        install_cmd = f".\\rowerki_venv\\Scripts\\python.exe -m pip install {package}"
         print(f"Missing package: {package}", file=sys.stderr)
         print("Install it with:", install_cmd, file=sys.stderr)
         sys.exit(1)

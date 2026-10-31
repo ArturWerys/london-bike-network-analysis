@@ -33,7 +33,7 @@ W dawnym trybie kolor trasy i stacji oznacza przyblizony sektor Londynu: centrum
 Glowny sposob uruchomienia zostaje bez zmian:
 
 ```powershell
-.\.venv\Scripts\python.exe .\05_pygame_route_animation.py
+.\rowerki_venv\Scripts\python.exe .\05_pygame_route_animation.py
 ```
 
 Po starcie zobaczysz menu w oknie `pygame` z wyborem trybu (klikalne przyciski):
@@ -49,9 +49,9 @@ Po wyborze trybu to samo okno zostaje otwarte: pojawia sie ekran `Ladowanie...`,
 Mozesz tez pominac menu i wybrac tryb argumentem:
 
 ```powershell
-.\.venv\Scripts\python.exe .\05_pygame_route_animation.py --mode two_years
-.\.venv\Scripts\python.exe .\05_pygame_route_animation.py --mode two_years_heatmap
-.\.venv\Scripts\python.exe .\05_pygame_route_animation.py --mode weekday_weekend
+.\rowerki_venv\Scripts\python.exe .\05_pygame_route_animation.py --mode two_years
+.\rowerki_venv\Scripts\python.exe .\05_pygame_route_animation.py --mode two_years_heatmap
+.\rowerki_venv\Scripts\python.exe .\05_pygame_route_animation.py --mode weekday_weekend
 ```
 
 W menu glownym `two_years_heatmap` jest pokazywany jako `Animacja dwóch lat`, a stary `two_years` zostaje w podmenu `Dawne tryby`. `weekday_weekend` dziala jako alias do wspolnego trybu heatmapy.
@@ -59,19 +59,19 @@ W menu glownym `two_years_heatmap` jest pokazywany jako `Animacja dwóch lat`, a
 Jesli chcesz pokazac wiecej stacji w trybie 2-letnim, mozesz podac ich liczbe recznie:
 
 ```powershell
-.\.venv\Scripts\python.exe .\05_pygame_route_animation.py --station-count 300
+.\rowerki_venv\Scripts\python.exe .\05_pygame_route_animation.py --station-count 300
 ```
 
 Mozesz tez recznie zmienic liczbe pokazywanych tras:
 
 ```powershell
-.\.venv\Scripts\python.exe .\05_pygame_route_animation.py --max-routes 25
+.\rowerki_venv\Scripts\python.exe .\05_pygame_route_animation.py --max-routes 25
 ```
 
 Jesli chcesz ostrzejsza mape i masz zapas pamieci, mozesz podniesc jakosc statycznej warstwy:
 
 ```powershell
-.\.venv\Scripts\python.exe .\05_pygame_route_animation.py --render-scale 1.5
+.\rowerki_venv\Scripts\python.exe .\05_pygame_route_animation.py --render-scale 1.5
 ```
 
 Domyslnie animacja jedzie teraz wolniej (`--time-scale 85`), a stacje poza aktywnymi trasami sa rysowane bardziej subtelnie.
