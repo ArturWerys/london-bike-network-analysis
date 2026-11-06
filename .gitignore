@@ -1,4 +1,7 @@
+raw_data/
+processed_data/
 Data/
+.cache.sqlite*
 rowerki_venv/
 ToDo.md
 __pycache__
